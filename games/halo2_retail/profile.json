@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "halo2_retail",
+  "name": "Halo 2 (Xbox retail, certificate version 3)",
+  "binary": {
+    "sha256": "03215919bb7163259257d361f4c7bf802a7ab12aa85e2689436369b5c427935d",
+    "title_id": "0x4D530064",
+    "base_address": "0x00010000",
+    "entry_point": "0x002D0AEE",
+    "size_of_image": "0x005754C0"
+  },
+  "roots": [],
+  "lift": [],
+  "variables": {},
+  "function_overrides": {}
+}

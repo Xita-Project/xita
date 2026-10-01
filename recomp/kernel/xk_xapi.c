@@ -6,6 +6,8 @@
 #include "xk.h"
 
 void xk_threads_init(uint32_t tls_dir);
+void xk_crypto_init(uint32_t image_base, uint32_t image_size);
+uint32_t xk_crypto_export(unsigned ordinal);
 
 /* generated tables (xv_fn_table.c) */
 typedef struct { uint32_t slot, ordinal; } xv_kimport_t;
@@ -25,7 +27,7 @@ static uint32_t data_export_var(unsigned ordinal)
     case 164: return xk_var_LaunchDataPage;
     case 324: return xk_var_XboxKrnlVersion;
     case 40:  return xk_var_HalDiskCachePartitionCount;
-    default:  return 0;
+    default:  return xk_crypto_export(ordinal);
     }
 }
 
@@ -73,6 +75,7 @@ void xk_init(uint32_t image_base, uint32_t image_size, uint32_t tls_dir, const c
     if (game_dir) g_game_dir = game_dir;
     if (save_dir) g_save_dir = save_dir;
     xk_threads_init(tls_dir);            /* memory was set up by xk_mem_setup() before the image was loaded */
+    xk_crypto_init(image_base, image_size);
     xk_thunks_init();
     char udata[512], tdata[512], cache[512];
     snprintf(udata, sizeof udata, "%s/udata", g_save_dir);
@@ -204,6 +207,7 @@ static void xv_force_mp_start(xctx *c)
     uint32_t sess = X_M32(0x2E362Cu);
     if (!sess) { XK_LOG("[force-start] no client session at [2E362C]\n"); return; }
     uint16_t state = X_M16(sess + 0xCA6u);
+    if (state != 2) { XK_LOG("[force-start] session state %u is not the ready lobby\n", state); return; }
     XK_LOG("[force-start] session %08X state %u -> calling A1240\n", sess, state);
     uint32_t saved = c->r[4];
     X_PUSH32(sess);              /* stdcall arg */
@@ -216,9 +220,22 @@ void xv_hle_XInputGetState(xctx *c)
 {
     static uint32_t packet; xk_os_pad p; xk_os_pad_poll(&p);
     uint32_t st = X_ARG(1);
+    { static int held; int pressed = p.analog[0] && !held; held = p.analog[0] != 0;
+      uint32_t host = X_M32(0x2E3628u), sess = X_M32(0x2E362Cu);
+      if (pressed && host && sess && X_M16(sess + 0xCA6u) == 2) {
+          XK_LOG("[lobby-start] system_link %u host %08X players %u minimum %d blocked %u countdown %u root %08X slots %d/%d/%d/%d\n",
+              X_M8(0x2E3630u), host, X_M16(host + 0x22Cu), (int8_t)X_M8(host + 0x115u),
+              X_M8(host + 0x495u), X_M8(host + 0x494u), X_M32(0x2E4000u),
+              (int16_t)X_M16(host + 0x448u), (int16_t)X_M16(host + 0x458u),
+              (int16_t)X_M16(host + 0x468u), (int16_t)X_M16(host + 0x478u));
+          uint32_t root = X_M32(0x2E4000u);
+          if (root) XK_LOG("[lobby-start] root tag %08X child %08X\n", X_M32(root), X_M32(root + 0x34u) ? X_M32(X_M32(root + 0x34u)) : 0);
+      } }
     { static int fs = -1; if (fs < 0) { const char *e = getenv("XV_FORCE_START"); fs = e ? atoi(e) : 0; }
-      if (fs && X_ARG(0) == 0x00777701u && p.force_start) {                               /* L+R+Triangle chord or "force" script token */
-          static int fired; if (!fired) { fired = 1; xv_force_mp_start(c); } } }
+      if (fs && X_ARG(0) == 0x00777701u) {                                             /* L+R+Triangle chord or "force" script token */
+          static int held;
+          int pressed = p.force_start && !held; held = p.force_start != 0;
+          if (pressed) xv_force_mp_start(c); } }
     if (X_ARG(0) == 0x00777702u) {                   /* virtual player 2: idle except what the pad layer injects (script p2* tokens / chord) */
         { static unsigned n; if (p.p2_buttons || p.p2_analog[0] || (n++ % 240) == 0) XK_LOG("[pad] P2 poll #%u buttons %04X A %u from %08X\n", n, p.p2_buttons, p.p2_analog[0], X_M32(c->r[4])); }
         X_M32(st) = ++packet; X_M16(st + 4) = p.p2_buttons; memcpy(X_G(st + 6), p.p2_analog, 8);
@@ -234,7 +251,10 @@ void xv_hle_XInputSetState(xctx *c) { c->r[0] = 0; X_RET(2); }
 void xv_hle_XapiBootToDash(xctx *c) { XK_LOG("XapiBootToDash(%u, %u, %u) - game exited to dashboard\n", X_ARG(0), X_ARG(1), X_ARG(2)); exit(0); }
 void xv_hle_XLaunchNewImageA(xctx *c) { XK_LOG("XLaunchNewImageA(\"%s\") - not supported, exiting\n", xk_gstr(X_ARG(0))); exit(0); }
 void xv_hle_OutputDebugStringA(xctx *c) { const char *s = xk_gstr(X_ARG(0)); XK_LOG("debug: %s%s", s, s[0] && s[strlen(s) - 1] == '\n' ? "" : "\n"); X_RET(1); }
-void xv_hle_XCalculateSignatureBegin(xctx *c) { c->r[0] = 0xFFFFFFFFu; X_RET(1); }       /* INVALID_HANDLE_VALUE */
+/* Compatibility mode for existing unsigned profiles. Recompile these XAPI
+ * functions with --lift to exercise real signing; checkpoint restore and legacy
+ * profile migration must pass before enabling that path in regular builds. */
+void xv_hle_XCalculateSignatureBegin(xctx *c) { c->r[0] = 0xFFFFFFFFu; X_RET(1); }
 
 /* XNet / Winsock: no network */
 #define NETLOG(fn, nargs) do { XK_LOG("[net] " fn "(%08X,%08X,%08X,%08X) from %08X\n", X_ARG(0), X_ARG(1), X_ARG(2), X_ARG(3), X_M32(c->r[4])); } while (0)

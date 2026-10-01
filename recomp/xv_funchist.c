@@ -86,12 +86,16 @@ void xv_trace_func_dump(const char *tag)
     }
 }
 
-/* ---- sampling profiler (XV_PROF=1): a 1 kHz thread on another core samples xv_cur_fn (the function the
- * game thread entered most recently) and every 10 s logs the top entries.  Attribution is "last entered
- * function", so HLE work lands on the guest function that called it - good enough to find the hot spots. */
+/* ---- sampling profiler: a 1 kHz thread samples the current guest function or
+ * HLE call target and every 10k samples logs the top entries. Generated direct
+ * calls, indirect dispatch and guest thread switches restore the caller marker.
+ * These are wall-clock samples, not hardware CPU-cycle or GPU-time measurements. */
 static struct { uint32_t fn, n; } ps[4096]; static unsigned ps_used, ps_total;
 static void prof_sample(uint32_t fn)
 {
+    /* Zero means uninstrumented guest code. Keep it in the report instead of
+     * incrementing an empty hash slot which prof_dump silently omits. */
+    if (!fn) fn = UINT32_MAX;
     uint32_t h = (fn * 2654435761u) >> 20;
     for (unsigned i = 0; i < 4096; ++i) {
         uint32_t k = (h + i) & 4095;
@@ -107,11 +111,15 @@ static void prof_dump(void)
     char line[220]; int ln = 0;
     xv_logf("[prof] %u samples, %u functions; top by time:\n", ps_total, n);
     for (unsigned i = 0; i < n && i < 40; ++i) {
-        ln += snprintf(line + ln, sizeof line - ln, rows[i][0] & 0x80000000u ? " H%X:%.1f%%" : " %X:%.1f%%", rows[i][0] & 0x7FFFFFFFu, 100.0 * rows[i][1] / (ps_total ? ps_total : 1));   /* Hxxxx = time inside the HLE called from guest address xxxx */
+        float percent = 100.0 * rows[i][1] / (ps_total ? ps_total : 1);
+        if (rows[i][0] == UINT32_MAX)
+            ln += snprintf(line + ln, sizeof line - ln, " unattributed:%.1f%%", percent);
+        else
+            ln += snprintf(line + ln, sizeof line - ln, rows[i][0] & 0x80000000u ? " H%X:%.1f%%" : " %X:%.1f%%", rows[i][0] & 0x7FFFFFFFu, percent);   /* Hxxxx = time inside the HLE called from guest address xxxx */
         if (ln > 170 || i + 1 == n || i == 39) { xv_logf("[prof]%s\n", line); ln = 0; }
     }
     memset(ps, 0, sizeof ps); ps_used = ps_total = 0;
-    { extern void xk_wait_stats_dump(void) __attribute__((weak)); if (xk_wait_stats_dump) xk_wait_stats_dump(); }
+    { extern void xk_wait_stats_request(void) __attribute__((weak)); if (xk_wait_stats_request) xk_wait_stats_request(); }
 }
 static void prof_thread(void *arg)
 {
@@ -121,8 +129,11 @@ static void prof_thread(void *arg)
 }
 void xv_prof_start(void)
 {
-    const char *e = getenv("XV_PROF"); if (e && !atoi(e)) return;          /* on by default in a --trace-funcs build; XV_PROF=0 disables */
+    extern const unsigned xv_guest_trace_enabled __attribute__((weak));
+    int traced = &xv_guest_trace_enabled && xv_guest_trace_enabled;
+    const char *e = getenv("XV_PROF");
+    if (e ? !atoi(e) : !traced) return; /* --trace-funcs builds collect by default; normal builds opt in */
     extern int xk_os_audio_thread_start(void (*fn)(void *), void *arg);      /* same helper: a plain thread */
-    xv_logf("[prof] sampling profiler on (1 kHz)\n");
+    xv_logf("[prof] sampling profiler on (1 kHz); guest function tracing %s\n", traced ? "enabled" : "absent");
     xk_os_audio_thread_start(prof_thread, NULL);
 }

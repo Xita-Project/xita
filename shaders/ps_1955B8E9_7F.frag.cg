@@ -39,113 +39,114 @@ struct VertOut
 float4 main(VertOut IN, uniform sampler2D tex0, uniform sampler2D tex1, uniform sampler2D tex2, uniform samplerCUBE tex3, uniform float4 psc[18], uniform float4 xv_fogcolor, uniform float4 xv_atest) : COLOR
 {
     // ---- inputs (varyings the vertex program does not write read as NV2A defaults)
-    float4 v0 = IN.color0, v1 = IN.color1;
-    float4 fog = float4(xv_fogcolor.rgb, saturate(IN.fog));
-    float4 r0 = float4(0.0, 0.0, 0.0, 0.0), r1 = float4(0.0, 0.0, 0.0, 0.0);
-    float4 t0 = tex2D(tex0, IN.texcoord0.xy);
-    float4 t1 = tex2D(tex1, IN.texcoord1.xy);
-    float4 t2 = tex2D(tex2, IN.texcoord2.xy);
-    float4 t3 = texCUBE(tex3, IN.texcoord3.xyz);
+    half4 v0 = IN.color0, v1 = IN.color1;
+    half4 fog = half4(xv_fogcolor.rgb, saturate(IN.fog));
+    half4 r0 = half4(0.0, 0.0, 0.0, 0.0), r1 = half4(0.0, 0.0, 0.0, 0.0);
+    half4 t0 = tex2D(tex0, IN.texcoord0.xy);
+    half4 t1 = tex2D(tex1, IN.texcoord1.xy);
+    half4 t2 = tex2D(tex2, IN.texcoord2.xy);
+    half4 t3 = texCUBE(tex3, IN.texcoord3.xyz);
+    r0.a = t0.a;
     // ---- combiner stage 0
     {
-        float3 A = saturate(t2.rgb), B = saturate(psc[8].rgb), C = saturate(t0.aaa), D = saturate(t1.aaa);
-        float3 AB = float3(dot(A, B));
-        float3 CD = C * D;
-        float3 SUM = AB + CD;
-        float  a_A = saturate(t2.b), a_B = (1.0 - saturate(float4(0.0, 0.0, 0.0, 0.0).b)), a_C = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(float4(0.0, 0.0, 0.0, 0.0).b);
-        float  a_AB = a_A * a_B, a_CD = a_C * a_D;
-        float  a_SUM = a_AB + a_CD;
+        half3 A = saturate(t2.rgb), B = saturate(psc[8].rgb), C = saturate(t0.aaa), D = saturate(t1.aaa);
+        half3 AB = half3(dot(A, B));
+        half3 CD = C * D;
+        half3 SUM = AB + CD;
+        half  a_A = saturate(t2.b), a_B = (1.0 - saturate(half4(0.0, 0.0, 0.0, 0.0).b)), a_C = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(half4(0.0, 0.0, 0.0, 0.0).b);
+        half  a_AB = a_A * a_B, a_CD = a_C * a_D;
+        half  a_SUM = a_AB + a_CD;
         r0.rgb = clamp(AB, -1.0, 1.0);
         r1.rgb = clamp(CD, -1.0, 1.0);
         r0.a = clamp(a_AB, -1.0, 1.0);
     }
     // ---- combiner stage 1
     {
-        float3 A = saturate(v0.rgb), B = (1.0 - saturate(float4(0.0, 0.0, 0.0, 0.0).rgb)), C = saturate(r0.rgb), D = saturate(psc[1].rgb);
-        float3 AB = A * B;
-        float3 CD = C * D;
-        float3 SUM = AB + CD;
-        float  a_A = saturate(r0.a), a_B = (1.0 - saturate(float4(0.0, 0.0, 0.0, 0.0).b)), a_C = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(float4(0.0, 0.0, 0.0, 0.0).b);
-        float  a_AB = a_A * a_B, a_CD = a_C * a_D;
-        float  a_SUM = a_AB + a_CD;
+        half3 A = saturate(v0.rgb), B = (1.0 - saturate(half4(0.0, 0.0, 0.0, 0.0).rgb)), C = saturate(r0.rgb), D = saturate(psc[1].rgb);
+        half3 AB = A * B;
+        half3 CD = C * D;
+        half3 SUM = AB + CD;
+        half  a_A = saturate(r0.a), a_B = (1.0 - saturate(half4(0.0, 0.0, 0.0, 0.0).b)), a_C = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(half4(0.0, 0.0, 0.0, 0.0).b);
+        half  a_AB = a_A * a_B, a_CD = a_C * a_D;
+        half  a_SUM = a_AB + a_CD;
         v0.rgb = clamp(SUM, -1.0, 1.0);
         t1.a = clamp(a_AB, -1.0, 1.0);
     }
     // ---- combiner stage 2
     {
-        float3 A = (1.0 - saturate(r0.aaa)), B = (1.0 - saturate(float4(0.0, 0.0, 0.0, 0.0).rgb)), C = saturate(r0.aaa), D = saturate(psc[2].rgb);
-        float3 AB = A * B;
-        float3 CD = C * D;
-        float3 SUM = AB + CD;
-        float  a_A = saturate(r0.b), a_B = (1.0 - saturate(float4(0.0, 0.0, 0.0, 0.0).b)), a_C = saturate(r1.b), a_D = saturate(v1.a);
-        float  a_AB = a_A * a_B, a_CD = a_C * a_D;
-        float  a_SUM = a_AB + a_CD;
+        half3 A = (1.0 - saturate(r0.aaa)), B = (1.0 - saturate(half4(0.0, 0.0, 0.0, 0.0).rgb)), C = saturate(r0.aaa), D = saturate(psc[2].rgb);
+        half3 AB = A * B;
+        half3 CD = C * D;
+        half3 SUM = AB + CD;
+        half  a_A = saturate(r0.b), a_B = (1.0 - saturate(half4(0.0, 0.0, 0.0, 0.0).b)), a_C = saturate(r1.b), a_D = saturate(v1.a);
+        half  a_AB = a_A * a_B, a_CD = a_C * a_D;
+        half  a_SUM = a_AB + a_CD;
         r0.rgb = clamp(SUM, -1.0, 1.0);
         r0.a = clamp(a_AB, -1.0, 1.0);
         r1.a = clamp(a_CD, -1.0, 1.0);
     }
     // ---- combiner stage 3
     {
-        float3 A = saturate(float4(0.0, 0.0, 0.0, 0.0).rgb), B = (0.5 - max(float4(0.0, 0.0, 0.0, 0.0).rgb, 0.0)), C = (1.0 - saturate(float4(0.0, 0.0, 0.0, 0.0).rgb)), D = saturate(t1.rgb);
-        float3 AB = A * B;
-        float3 CD = C * D;
-        float3 SUM = AB + CD;
-        float  a_A = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_B = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_C = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(float4(0.0, 0.0, 0.0, 0.0).b);
-        float  a_AB = a_A * a_B, a_CD = a_C * a_D;
-        float  a_SUM = a_AB + a_CD;
+        half3 A = saturate(half4(0.0, 0.0, 0.0, 0.0).rgb), B = (0.5 - max(half4(0.0, 0.0, 0.0, 0.0).rgb, 0.0)), C = (1.0 - saturate(half4(0.0, 0.0, 0.0, 0.0).rgb)), D = saturate(t1.rgb);
+        half3 AB = A * B;
+        half3 CD = C * D;
+        half3 SUM = AB + CD;
+        half  a_A = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_B = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_C = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(half4(0.0, 0.0, 0.0, 0.0).b);
+        half  a_AB = a_A * a_B, a_CD = a_C * a_D;
+        half  a_SUM = a_AB + a_CD;
         t1.rgb = clamp(SUM, -1.0, 1.0);
     }
     // ---- combiner stage 4
     {
-        float3 A = saturate(t3.rgb), B = saturate(v1.rgb), C = saturate(v0.rgb), D = saturate(r0.rgb);
-        float3 AB = A * B;
-        float3 CD = C * D;
-        float3 SUM = AB + CD;
-        float  a_A = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_B = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_C = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(float4(0.0, 0.0, 0.0, 0.0).b);
-        float  a_AB = a_A * a_B, a_CD = a_C * a_D;
-        float  a_SUM = a_AB + a_CD;
+        half3 A = saturate(t3.rgb), B = saturate(v1.rgb), C = saturate(v0.rgb), D = saturate(r0.rgb);
+        half3 AB = A * B;
+        half3 CD = C * D;
+        half3 SUM = AB + CD;
+        half  a_A = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_B = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_C = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(half4(0.0, 0.0, 0.0, 0.0).b);
+        half  a_AB = a_A * a_B, a_CD = a_C * a_D;
+        half  a_SUM = a_AB + a_CD;
         t3.rgb = clamp(AB, -1.0, 1.0);
         v0.rgb = clamp(CD, -1.0, 1.0);
     }
     // ---- combiner stage 5
     {
-        float3 A = saturate(psc[13].rgb), B = (1.0 - saturate(float4(0.0, 0.0, 0.0, 0.0).rgb)), C = saturate(v0.aaa), D = (-(psc[5].rgb));
-        float3 AB = A * B;
-        float3 CD = C * D;
-        float3 SUM = AB + CD;
-        float  a_A = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_B = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_C = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(float4(0.0, 0.0, 0.0, 0.0).b);
-        float  a_AB = a_A * a_B, a_CD = a_C * a_D;
-        float  a_SUM = a_AB + a_CD;
+        half3 A = saturate(psc[13].rgb), B = (1.0 - saturate(half4(0.0, 0.0, 0.0, 0.0).rgb)), C = saturate(v0.aaa), D = (-(psc[5].rgb));
+        half3 AB = A * B;
+        half3 CD = C * D;
+        half3 SUM = AB + CD;
+        half  a_A = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_B = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_C = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(half4(0.0, 0.0, 0.0, 0.0).b);
+        half  a_AB = a_A * a_B, a_CD = a_C * a_D;
+        half  a_SUM = a_AB + a_CD;
         r1.rgb = clamp(SUM, -1.0, 1.0);
     }
     // ---- combiner stage 6
     {
-        float3 A = saturate(t0.rgb), B = saturate(t1.rgb), C = saturate(t0.rgb), D = saturate(t1.rgb);
-        float3 AB = A * B;
-        float3 CD = C * D;
-        float3 SUM = AB + CD;
-        float  a_A = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_B = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_C = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(float4(0.0, 0.0, 0.0, 0.0).b);
-        float  a_AB = a_A * a_B, a_CD = a_C * a_D;
-        float  a_SUM = a_AB + a_CD;
+        half3 A = saturate(t0.rgb), B = saturate(t1.rgb), C = saturate(t0.rgb), D = saturate(t1.rgb);
+        half3 AB = A * B;
+        half3 CD = C * D;
+        half3 SUM = AB + CD;
+        half  a_A = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_B = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_C = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(half4(0.0, 0.0, 0.0, 0.0).b);
+        half  a_AB = a_A * a_B, a_CD = a_C * a_D;
+        half  a_SUM = a_AB + a_CD;
         t0.rgb = clamp(SUM, -1.0, 1.0);
     }
     // ---- combiner stage 7
     {
-        float3 A = saturate(t0.rgb), B = saturate(v0.rgb), C = saturate(t3.rgb), D = saturate(r1.aaa);
-        float3 AB = A * B;
-        float3 CD = C * D;
-        float3 SUM = AB + CD;
-        float  a_A = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_B = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_C = saturate(float4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(float4(0.0, 0.0, 0.0, 0.0).b);
-        float  a_AB = a_A * a_B, a_CD = a_C * a_D;
-        float  a_SUM = a_AB + a_CD;
+        half3 A = saturate(t0.rgb), B = saturate(v0.rgb), C = saturate(t3.rgb), D = saturate(r1.aaa);
+        half3 AB = A * B;
+        half3 CD = C * D;
+        half3 SUM = AB + CD;
+        half  a_A = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_B = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_C = saturate(half4(0.0, 0.0, 0.0, 0.0).b), a_D = saturate(half4(0.0, 0.0, 0.0, 0.0).b);
+        half  a_AB = a_A * a_B, a_CD = a_C * a_D;
+        half  a_SUM = a_AB + a_CD;
         r0.rgb = clamp(SUM, -1.0, 1.0);
     }
     // ---- final combiner
-    float4 v1r0_sum = float4(v1.rgb + r0.rgb, 0.0);
-    float4 ef_prod = float4(saturate(r0.rgb) * saturate(psc[16].aaa), 0.0);
-    float3 FA = (1.0 - saturate(v0.aaa)), FB = saturate(ef_prod.rgb), FC = saturate(psc[16].rgb), FD = saturate(r1.rgb);
-    float3 out_rgb = FA * FB + (1.0 - FA) * FC + FD;
-    float  out_a   = saturate(t2.a);
+    half4 v1r0_sum = half4(v1.rgb + r0.rgb, 0.0);
+    half4 ef_prod = half4(saturate(r0.rgb) * saturate(psc[16].aaa), 0.0);
+    half3 FA = (1.0 - saturate(v0.aaa)), FB = saturate(ef_prod.rgb), FC = saturate(psc[16].rgb), FD = saturate(r1.rgb);
+    half3 out_rgb = FA * FB + (1.0 - FA) * FC + FD;
+    half  out_a   = saturate(t2.a);
     // ---- alpha test (NV097_SET_ALPHA_TEST_ENABLE/FUNC/REF): xv_atest = (ref, func 0..7, enable, 0)
     //      0 NEVER 1 LESS 2 EQUAL 3 LEQUAL 4 GREATER 5 NOTEQUAL 6 GEQUAL 7 ALWAYS  (NV097 0x200+n)
     if (xv_atest.z > 0.5) {

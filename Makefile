@@ -1,3 +1,4 @@
+PYTHON ?= python3
 # ---------------------------------------------------------------------------
 #  Xita — vitasdk Makefile
 #
@@ -26,20 +27,22 @@ STRIP     := $(PREFIX)-strip
 SIZE      := $(PREFIX)-size
 
 # --- 3. sources + flags ------------------------------------------------------
-SRCS      := main.c xv_shader.c xv_d3d.c xv_scene.c xv_ui_gxm.c xv_log.c
+SRCS      := runtime/main.c runtime/xv_shader.c runtime/xv_d3d.c runtime/xv_scene.c runtime/xv_ui_gxm.c runtime/xv_log.c runtime/xv_benchmark.c runtime/xv_cpu.c runtime/xv_texture_worker.c runtime/xv_geometry_worker.c runtime/xv_gpu_upload.c runtime/xv_vertex_upload.c runtime/xv_draw_profile.c runtime/xv_render_profile.c
 BUILD     := build
 OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(SRCS))
 DEPS      := $(OBJS:.o=.d)
 
-# Generated at build time from the Stage 2b/3 shader manifest (see gen_layouts.py).
+# Generated at build time from the Stage 2b/3 shader manifest (see recompiler/gen_layouts.py).
 LAYOUTS_H := shaders/xv_layouts.h
 LAYOUTS_SRC := shaders/halo_shaders.json
 
-CFLAGS    := -O2 -mthumb -Wall -Wextra -Wno-unused-parameter -MMD -MP -I. -Ishaders
-LDFLAGS   := -Wl,-q
+CFLAGS    := -O2 -mthumb -Wall -Wextra -Wno-unused-parameter -MMD -MP -I. -Iruntime -Ishaders
+# Reserve room for vita-elf-create's module/import metadata before the next
+# load segment. Traced builds can otherwise end too close to its boundary.
+LDFLAGS   := -Wl,-q,--defsym=__sce_headroom=0x1000
 
 # --- 4. linker stubs ---------------------------------------------------------
-# The five hardware modules main.c talks to directly …
+# The five hardware modules runtime/main.c talks to directly …
 LIBS      := -lSceGxm_stub \
              -lSceDisplay_stub \
              -lSceKernelThreadMgr_stub \
@@ -49,15 +52,25 @@ LIBS      := -lSceGxm_stub \
 LIBS      += -lSceLibKernel_stub -lSceTouch_stub -lm
 
 # --- Stage 4: run the recompiled Halo engine instead of the mock game (make RECOMP=1) ---
-# Swaps the runtime D3D HLE (xv_d3d.c/xv_scene.c) for the recompiled engine + kernel translator
-# (recomp/, linked as librecomp.a) and the GXM UI bridge; see xv_boot.c / xv_ui_gxm.c.
+# Swaps the runtime D3D HLE (runtime/xv_d3d.c/xv_scene.c) for the recompiled engine + kernel translator
+# (recomp/, linked as librecomp.a) and the GXM UI bridge; see runtime/xv_boot.c / runtime/xv_ui_gxm.c.
 RECOMP    ?= 0
+GAME_PROFILE ?= halo_ce_3925
+ifeq ($(wildcard games/$(GAME_PROFILE)/runtime.mk),)
+$(error No native runtime adapter for GAME_PROFILE=$(GAME_PROFILE))
+endif
+include games/$(GAME_PROFILE)/runtime.mk
 ifeq ($(RECOMP),1)
 CFLAGS    += -DXV_RUN_RECOMP -Irecomp -Irecomp/kernel
-SRCS      := main.c xv_shader.c xv_d3d.c xv_ui_gxm.c xv_boot.c xv_log.c
+SRCS      := runtime/main.c runtime/xv_shader.c runtime/xv_d3d.c runtime/xv_ui_gxm.c runtime/xv_boot.c runtime/xv_log.c runtime/xv_benchmark.c runtime/xv_cpu.c runtime/xv_texture_worker.c runtime/xv_geometry_worker.c runtime/xv_gpu_upload.c runtime/xv_vertex_upload.c runtime/xv_draw_profile.c runtime/xv_render_profile.c runtime/xv_settings.c dashboard/xv_dash.c
 OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(SRCS))
 DEPS      := $(OBJS:.o=.d)
-RECOMP_LINK_LIB := $(BUILD)/recomp/librecomp.a
+# Select the reviewed native adapter independently of generated game objects.
+RECOMP_LINK_LIB = $(BUILD)/recomp/libxita_sys.a $(BUILD)/recomp/libxita_game.a $(BUILD)/recomp/libxita_guest.a
+# Strong implementations must be retained even when generated declarations are
+# weak. Otherwise a static archive can silently leave the compatibility stub.
+RECOMP_LINK_FLAGS = -Wl,--whole-archive $(RECOMP_BUILD)/libxita_sys.a $(RECOMP_BUILD)/libxita_game.a -Wl,--no-whole-archive $(RECOMP_BUILD)/libxita_guest.a
+LIBS      += -lSceNet_stub -lSceNetCtl_stub -lScePspnetAdhoc_stub -lSceSysmodule_stub -lSceCommonDialog_stub
 LIBS      += -lSceCtrl_stub -lSceRtc_stub -lSceIofilemgr_stub -lSceAudio_stub -lScePower_stub
 PROJECT   := xita
 SFO_EXTRA := -d ATTRIBUTE2=12      # extended memory mode: +109 MB for the arena/heap/texture pool
@@ -65,7 +78,7 @@ VPK       := $(PROJECT).vpk
 endif
 
 # --- 2. shader ingestion -----------------------------------------------------
-# Stage 3 (shader_recomp_gen.py) writes .cg here; psp2cgc turns them into .gxp.
+# Stage 3 (recompiler/shader_recomp_gen.py) writes .cg here; psp2cgc turns them into .gxp.
 # The build looks for halo_shader_0.gxp explicitly and ships every .gxp found
 # under app0:shaders/ inside the VPK, where the runtime loads them.
 SHADER_DIR      := shaders
@@ -81,11 +94,12 @@ SHADER_MISSING  := $(filter-out $(SHADER_PRESENT),$(SHADER_GXP))
 VPK_SHADER_ARGS := $(foreach s,$(SHADER_PRESENT),-a $(s)=$(s))
 
 # Optional LiveArea assets (icon0.png, bg.png, startup.png, template.xml) and
-# scene packs exported by halo_scene_export.py (assets/*.bin -> app0:assets/).
+# scene packs exported by recompiler/halo_scene_export.py (assets/*.bin -> app0:assets/).
 SCE_SYS_DIR     := sce_sys
 SCE_SYS_FILES   := $(wildcard $(SCE_SYS_DIR)/*.png) $(wildcard $(SCE_SYS_DIR)/livearea/contents/*)
 SCENE_FILES     := $(if $(filter 1,$(RECOMP)),,$(wildcard assets/*.bin))   # mock-only; the real-game (RECOMP) build never loads it
-VPK_ASSET_ARGS  := $(foreach f,$(SCE_SYS_FILES) $(SCENE_FILES),-a $(f)=$(f))
+LICENSE_FILES  := LICENSE NOTICE THIRD_PARTY.md $(wildcard LICENSES/*.txt)
+VPK_ASSET_ARGS  := $(foreach f,$(SCE_SYS_FILES) $(SCENE_FILES) $(LICENSE_FILES),-a $(f)=$(f))
 
 # --- 5. packaging outputs ----------------------------------------------------
 ELF       := $(BUILD)/$(PROJECT).elf
@@ -102,26 +116,46 @@ VPK       := $(PROJECT).vpk
 
 all: $(VPK)
 
+dashboard/license_text.h: LICENSE NOTICE tools/embed_license.py
+	$(PYTHON) tools/embed_license.py
+$(BUILD)/dashboard/xv_dash.o: dashboard/license_text.h
+
 # generated layout tables (recompiled-shader attribute layouts) --------------------
 # The XBE + Stage 1 manifest let the generator hash each Xbox function blob so the
 # D3D HLE can recognise programs the game passes to CreateVertexShader().
 XBE       ?= haloce/default.xbe
-XBE_JSON  ?= game_manifest.json
-$(LAYOUTS_H): $(LAYOUTS_SRC) gen_layouts.py shader_recomp_gen.py
-	python3 gen_layouts.py $(LAYOUTS_SRC) $@ $(if $(wildcard $(XBE)),$(XBE) $(XBE_JSON))
+XBE_JSON  ?= local/halo_ce_3925/game_manifest.json
+$(LAYOUTS_H): Makefile $(LAYOUTS_SRC) recompiler/gen_layouts.py recompiler/shader_recomp_gen.py $(if $(filter 1,$(RECOMP)),$(XBE) $(XBE_JSON))
+	$(PYTHON) recompiler/gen_layouts.py $(LAYOUTS_SRC) $@ $(if $(wildcard $(XBE)),$(XBE) $(XBE_JSON))
 
-$(BUILD)/main.o: $(LAYOUTS_H)
+$(BUILD)/runtime/main.o: $(LAYOUTS_H)
+
+HUD_GXP := $(foreach h,A972FE61 5D70F0B3 EB818129,shaders/ps_$(h)_1D.frag.gxp)
+shaders/xv_hud_gxp.h: tools/embed_hud_shaders.py $(HUD_GXP)
+	$(PYTHON) tools/embed_hud_shaders.py $@
+$(BUILD)/runtime/xv_shader.o: shaders/xv_hud_gxp.h
+shaders/xv_vs_gxp.h: tools/embed_vertex_shaders.py tools/test_vertex_varyings.py shaders/xv_layouts.h $(wildcard shaders/halo_vs_*.gxp shaders/halo_vs_*.cg)
+	$(PYTHON) tools/test_vertex_varyings.py
+	$(PYTHON) tools/embed_vertex_shaders.py $@
+$(BUILD)/runtime/xv_shader.o: shaders/xv_vs_gxp.h
+shaders/xv_ps_gxp.h: tools/embed_ps_shaders.py shaders/xv_ps_table.h $(wildcard shaders/ps_*.gxp) shaders/xv_color.frag.gxp shaders/xv_texmod.frag.gxp shaders/xv_tex0.frag.gxp shaders/xv_lm.frag.gxp
+	$(PYTHON) tools/embed_ps_shaders.py $@
+$(BUILD)/runtime/xv_shader.o: shaders/xv_ps_gxp.h
 
 # compile ----------------------------------------------------------------------
 $(BUILD)/%.o: %.c | $(BUILD)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD):
 	@mkdir -p $(BUILD)
 
 # link -------------------------------------------------------------------------
-$(ELF): $(OBJS) $(RECOMP_LINK_LIB)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(RECOMP_LINK_LIB) $(LIBS)
+$(ELF): $(OBJS) $(RECOMP_LINK_LIB) Makefile
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(RECOMP_LINK_FLAGS) $(LIBS)
+ifeq ($(RECOMP),1)
+	@$(PREFIX)-nm $@ | awk '$$2 == "T" { strong[$$3] = 1 } END { if (!strong["xv_hle_HaloBuildVisibleIndices"] || !strong["xv_hle_HaloSignSavedRecord"]) { print "required Halo HLE resolved to a compatibility stub"; exit 1 } }'
+endif
 	@$(SIZE) $@
 
 # ELF -> VELF (resolves NIDs / import stubs) -> signed fself --------------------
@@ -135,7 +169,7 @@ $(SFO): Makefile | $(BUILD)
 	vita-mksfoex -s TITLE_ID=$(TITLE_ID) $(SFO_EXTRA) "$(TITLE)" $@
 
 # VPK: eboot + param.sfo + shaders/*.gxp (+ sce_sys assets when present) ------
-$(VPK): $(EBOOT) $(SFO) $(SHADER_PRESENT) $(SCE_SYS_FILES) $(SCENE_FILES)
+$(VPK): $(EBOOT) $(SFO) $(SHADER_PRESENT) $(SCE_SYS_FILES) $(SCENE_FILES) $(LICENSE_FILES)
 ifneq ($(SHADER_MISSING),)
 	@echo "warning: shader(s) not found, VPK built without them: $(SHADER_MISSING)"
 	@echo "         (run 'make shaders' with psp2cgc on PATH, or drop prebuilt .gxp files in $(SHADER_DIR)/)"
@@ -183,7 +217,7 @@ endef
 
 shaders-device: $(SHADER_CG)
 	$(need_vita_ip)
-	@test -n "$(SHADER_CG)" || { echo "no .cg files in $(SHADER_DIR)/ — run shader_recomp_gen.py first"; exit 1; }
+	@test -n "$(SHADER_CG)" || { echo "no .cg files in $(SHADER_DIR)/ — run recompiler/shader_recomp_gen.py first"; exit 1; }
 	@for f in $(SHADER_CG); do \
 		echo "upload $$f"; \
 		curl -sS --ftp-create-dirs -T "$$f" "ftp://$(VITA_IP):$(VITA_FTP_PORT)/$(DEVICE_SHADERS)/" || exit 1; \
@@ -205,7 +239,7 @@ endef
 
 shaders-usb: $(SHADER_CG)
 	$(need_vita_mount)
-	@test -n "$(SHADER_CG)" || { echo "no .cg files in $(SHADER_DIR)/ — run shader_recomp_gen.py first"; exit 1; }
+	@test -n "$(SHADER_CG)" || { echo "no .cg files in $(SHADER_DIR)/ — run recompiler/shader_recomp_gen.py first"; exit 1; }
 	@mkdir -p "$(VITA_MOUNT)/data/xita/shaders"
 	@if [ -f $(SHACCCG) ] && [ ! -f "$(VITA_MOUNT)/data/$(SHACCCG)" ]; then cp -v $(SHACCCG) "$(VITA_MOUNT)/data/"; fi
 	@cp -v $(SHADER_CG) "$(VITA_MOUNT)/data/xita/shaders/"
@@ -296,13 +330,24 @@ clean:
 # ---- Stage 4: recompiled game (ARM objects; linked into the runtime once the GXM bridge lands) ----
 RECOMP_DIR   := recomp
 RECOMP_BUILD := $(BUILD)/recomp
-RECOMP_SRCS  := $(wildcard $(RECOMP_DIR)/code_*.c) $(RECOMP_DIR)/xv_fn_table.c $(RECOMP_DIR)/xv_stubs_default.c \
-                $(RECOMP_DIR)/xv_x86rt.c $(RECOMP_DIR)/kernel/xk_mem.c $(RECOMP_DIR)/kernel/xk_rtl.c \
-                $(RECOMP_DIR)/kernel/xk_file.c $(RECOMP_DIR)/kernel/xk_thread.c $(RECOMP_DIR)/kernel/xk_xapi.c $(RECOMP_DIR)/kernel/xk_net.c \
-                $(RECOMP_DIR)/kernel/xd3d.c $(RECOMP_DIR)/kernel/xk_audio.c $(RECOMP_DIR)/kernel/xk_os_vita.c \
-                $(RECOMP_DIR)/xv_trace_stub.c $(RECOMP_DIR)/xv_funchist.c
-RECOMP_OBJS  := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(RECOMP_SRCS))
-RECOMP_CFLAGS := -O2 -fno-strict-aliasing -mthumb -mcpu=cortex-a9 -mfpu=neon -w -std=gnu11 -I$(RECOMP_DIR) -I$(RECOMP_DIR)/kernel
+XITA_GUEST_SRCS := $(wildcard $(RECOMP_DIR)/code_*.c) $(RECOMP_DIR)/xv_fn_table.c $(RECOMP_DIR)/xv_stubs_default.c
+XITA_SYS_SRCS := $(RECOMP_DIR)/xv_x86rt.c $(RECOMP_DIR)/kernel/xk_mem.c $(RECOMP_DIR)/kernel/xk_rtl.c \
+                 $(RECOMP_DIR)/kernel/xk_file.c $(RECOMP_DIR)/kernel/xk_thread.c $(RECOMP_DIR)/kernel/xk_xapi.c $(RECOMP_DIR)/kernel/xk_net.c \
+                 $(RECOMP_DIR)/kernel/xd3d.c $(RECOMP_DIR)/kernel/xk_audio.c $(RECOMP_DIR)/kernel/xk_crypto.c $(RECOMP_DIR)/kernel/xk_os_vita.c \
+                 $(RECOMP_DIR)/xv_trace_stub.c $(RECOMP_DIR)/xv_funchist.c
+RECOMP_SRCS := $(XITA_GUEST_SRCS) $(XITA_SYS_SRCS) $(XITA_GAME_SRCS)
+RECOMP_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(RECOMP_SRCS))
+XITA_GUEST_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_GUEST_SRCS))
+XITA_SYS_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_SYS_SRCS))
+XITA_GAME_OBJS := $(patsubst $(RECOMP_DIR)/%.c,$(RECOMP_BUILD)/%.o,$(XITA_GAME_SRCS))
+RECOMP_CFLAGS := -O2 -fno-strict-aliasing -mthumb -mcpu=cortex-a9 -mfpu=neon -w -std=gnu11 -I. -Iruntime -I$(RECOMP_DIR) -I$(RECOMP_DIR)/kernel
+
+# Native replacements must retain the lifted multiply/add rounding points.
+$(RECOMP_BUILD)/kernel/xk_math.o: RECOMP_CFLAGS += -ffp-contract=off
+$(RECOMP_BUILD)/kernel/xk_clip.o: RECOMP_CFLAGS += -ffp-contract=off
+$(RECOMP_BUILD)/kernel/xk_bounds.o: RECOMP_CFLAGS += -ffp-contract=off
+recomp/kernel/xk_bounds.c: tools/gen_native_bounds.py games/halo_ce_3925/hooks.py recompiler/xita_recomp.py $(XBE) $(XBE_JSON)
+	$(PYTHON) tools/gen_native_bounds.py
 
 # lifted code (code_*.c) only includes xv_recomp_protos.h -> xv_x86rt.h; the kernel/HLE objects use -MMD
 # so a kernel header edit does not recompile the ~35 MB of generated code.
@@ -314,10 +359,23 @@ $(RECOMP_BUILD)/%.o: $(RECOMP_DIR)/%.c
 	$(CC) $(RECOMP_CFLAGS) -MMD -MP -c $< -o $@
 -include $(RECOMP_OBJS:.o=.d)
 
-$(RECOMP_BUILD)/librecomp.a: $(RECOMP_OBJS)
-	$(PREFIX)-gcc-ar rcs $@ $^
+# Recreate archives so removed/renamed members cannot survive an incremental build.
+$(RECOMP_BUILD)/libxita_sys.a: $(XITA_SYS_OBJS) Makefile
+	@rm -f $@
+	$(PREFIX)-gcc-ar rcs $@ $(XITA_SYS_OBJS)
+$(RECOMP_BUILD)/libxita_game.a: $(XITA_GAME_OBJS) games/$(GAME_PROFILE)/runtime.mk Makefile
+	@rm -f $@
+	$(PREFIX)-gcc-ar rcs $@ $(XITA_GAME_OBJS)
+$(RECOMP_BUILD)/libxita_guest.a: $(XITA_GUEST_OBJS) Makefile
+	@rm -f $@
+	$(PREFIX)-gcc-ar rcs $@ $(XITA_GUEST_OBJS)
 
-recomp-lib: $(RECOMP_BUILD)/librecomp.a
-	@$(PREFIX)-size -t $< | tail -1
+# Compatibility target for developer tools that still request the combined archive.
+$(RECOMP_BUILD)/librecomp.a: $(RECOMP_OBJS) Makefile
+	@rm -f $@
+	$(PREFIX)-gcc-ar rcs $@ $(RECOMP_OBJS)
+
+recomp-lib: $(RECOMP_BUILD)/libxita_sys.a $(RECOMP_BUILD)/libxita_game.a $(RECOMP_BUILD)/libxita_guest.a
+	@$(PREFIX)-size -t $^ | tail -1
 
 .PHONY: recomp-lib

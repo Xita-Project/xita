@@ -1,0 +1,73 @@
+#include <assert.h>
+#include <stdio.h>
+#include "../../runtime/xv_benchmark.c"
+void xv_logf(const char *fmt,...) { (void)fmt; }
+static int optimization=-1;
+static unsigned switches;
+void xv_benchmark_optimizations(int enabled) { optimization=enabled;switches++; }
+int main(void)
+{
+    const char *select = getenv("XV_BENCHMARK_DRAW_SCAN");
+    int scan = select && atoi(select) != 0;
+    select = getenv("XV_BENCHMARK_VERTEX_COPY");
+    int copy = select && atoi(select) != 0;
+    select = getenv("XV_BENCHMARK_NATIVE_BOUNDS");
+    int bounds = select && atoi(select) != 0;
+    select = getenv("XV_BENCHMARK_VERTEX_REFERENCES");
+    int references = select && atoi(select) != 0;
+    if (references) bounds = copy = scan = 0;
+    if (bounds) copy = scan = 0;
+    assert(xv_benchmark_compare_vertex_references() == references);
+    if (copy) scan = 0;
+    assert(xv_benchmark_compare_native_bounds() == bounds);
+    assert(xv_benchmark_compare_vertex_copy() == copy);
+    assert(xv_benchmark_compare_draw_scan() == scan);
+    float view[6]={1,2,3,0,1,0};uint64_t now=1;unsigned height=480;
+    xv_benchmark_toggle();assert(!xv_benchmark_step(now,height,0,view)&&!xv_benchmark_active());
+    xv_benchmark_toggle();assert(xv_benchmark_step(now,height,1,view)==544);
+    assert(xv_benchmark_active());height=544;xv_benchmark_applied(now,height);
+    for(unsigned phase=0;phase<3;phase++)for(unsigned frame=1;frame<=180;frame++) {
+        now+=phase==1?50000:100000;
+        unsigned next=xv_benchmark_step(now,height,1,view);
+        if(frame<180)assert(!next);
+        else {assert(next==(phase==0?360:phase==1?544:480));height=next;xv_benchmark_applied(now,height);}
+    }
+    assert(!xv_benchmark_active()&&!xv_benchmark_status()&&height==480&&b.view_ok);
+    assert(b.fps[0]==10&&b.fps[1]==20&&b.fps[2]==10);
+    /* A moved camera rejects comparability; cancel and loss of view restore. */
+    xv_benchmark_toggle();assert(xv_benchmark_step(now,360,1,view)==544);xv_benchmark_applied(now,544);
+    for(unsigned i=0;i<60;i++){now+=100000;assert(!xv_benchmark_step(now,544,1,view));}
+    view[0]+=1;now+=100000;assert(!xv_benchmark_step(now,544,1,view)&&!b.view_ok);
+    xv_benchmark_toggle();assert(xv_benchmark_step(now,544,1,view)==360);xv_benchmark_applied(now,360);assert(!b.active);
+    xv_benchmark_toggle();assert(xv_benchmark_step(now,400,1,view)==544);xv_benchmark_applied(now,544);
+    assert(xv_benchmark_step(now,544,0,view)==400);xv_benchmark_applied(now,400);
+    /* Failed scaled allocation cancels and restores the original resolution. */
+    xv_benchmark_toggle();assert(xv_benchmark_step(now,480,1,view)==544);xv_benchmark_applied(now,544);
+    for(unsigned i=0;i<180;i++){now+=100000;unsigned next=xv_benchmark_step(now,544,1,view);assert(next==(i==179?360:0));}
+    xv_benchmark_applied(now,544);assert(xv_benchmark_step(now,544,1,view)==480);
+    xv_benchmark_applied(now,480);assert(!b.active&&!xv_benchmark_status());
+    puts("PASS: timed 544/360/544 phases, warmup excluded, view rejection, cancel/menu/allocation fallback and restoration");
+    assert(!switches); /* Resolution testing must not touch CPU switches. */
+    xv_benchmark_compare_toggle();assert(xv_benchmark_step(now,480,1,view)==480);
+    assert(!strcmp(tag(), references ? "vertex-references-compare" : bounds ? "native-bounds-compare" : copy ? "vertex-copy-compare" : scan ? "draw-scan-compare" : "flare-compare"));
+    assert(optimization==0 && (xv_benchmark_status()&(1u<<19)));
+    xv_benchmark_applied(now,480);
+    for(unsigned phase=0;phase<3;phase++)for(unsigned frame=1;frame<=180;frame++) {
+        assert(optimization==(int)(phase==1));
+        now+=phase==1?80000:100000;
+        unsigned next=xv_benchmark_step(now,480,1,view);
+        if(frame<180)assert(!next);
+        else {assert(next==480);xv_benchmark_applied(now,480);}
+    }
+    assert(!b.active&&!xv_benchmark_status()&&optimization==-1&&switches==4);
+    assert(b.fps[0]==10&&b.fps[1]==12.5&&b.fps[2]==10&&b.view_ok);
+    /* Cancellation during the enabled phase restores configured defaults. */
+    xv_benchmark_compare_toggle();assert(xv_benchmark_step(now,360,1,view)==360);xv_benchmark_applied(now,360);
+    for(unsigned i=0;i<180;i++){now+=100000;unsigned next=xv_benchmark_step(now,360,1,view);if(next)xv_benchmark_applied(now,next);}
+    assert(optimization==1);xv_benchmark_toggle();assert(xv_benchmark_step(now,360,1,view)==360);
+    xv_benchmark_applied(now,360);assert(optimization==-1&&!b.active);
+    xv_benchmark_compare_toggle();assert(xv_benchmark_step(now,544,1,view)==544);xv_benchmark_applied(now,544);
+    assert(xv_benchmark_step(now,544,0,view)==544&&optimization==-1);xv_benchmark_applied(now,544);
+    switches=0;xv_benchmark_compare_toggle();assert(!xv_benchmark_step(now,544,0,view)&&!switches&&!b.active);
+    puts("PASS: CPU off/on/off uses fixed resolution, excludes warmup and restores overrides on completion, cancellation or lost view");
+}

@@ -36,7 +36,7 @@ struct AppIn
 struct VertOut
 {
     float4 position    : POSITION;   // oPos
-    float  fog         : FOG;   // oFog
+    float  fog         : TEXCOORD7;   // oFog
     float4 texcoord0   : TEXCOORD0;   // oT0
     float4 texcoord1   : TEXCOORD1;   // oT1
     float4 texcoord2   : TEXCOORD2;   // oT2

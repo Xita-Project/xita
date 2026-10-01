@@ -2,8 +2,17 @@
 
 Standalone C diagnostic for two homebrew PS Vitas. Contains no game code or data.
 Builds `xita_adhoctest.vpk`, title **Xita AdHoc Test**, title ID **XITAADH01**.
-Hardware behavior has not been tested; a successful build is not evidence of a
-working wireless connection.
+The first hardware attempt stopped during graphics initialization, before any
+network calls. Revision **20260908b**, app version **01.01**, updates that startup
+path; wireless connectivity still needs testing on two consoles. See the
+[startup investigation](../../docs/adhoc-startup-20260908.md).
+
+## Download
+
+The private [September 8 development release](https://github.com/BirchWoodGod/xita/releases/tag/dev-20260908)
+includes `xita_adhoctest-20260908b.vpk`. Install it with VitaShell on both consoles; it has
+its own bubble and does not replace Xita. No Halo data is required for this test.
+This replaces the earlier `xita_adhoctest.vpk`, which failed to start on hardware.
 
 ## Build
 
@@ -22,6 +31,10 @@ errors. The installed linker script supports `__sce_headroom`; reserving 64 KiB
 prevents `vita-elf-create` import metadata from overlapping the data segment.
 Only installed SDK stub archives are linked. NetCheck uses `SceCommonDialog_stub`;
 there is no separate `SceNetCheckDialog_stub` archive in this SDK.
+
+Run `python tools/test_adhoc_screen.py` from the repository root for the host
+display ownership/failure checks. These require a C compiler with AddressSanitizer
+and UndefinedBehaviorSanitizer; they model firmware calls and do not test Wi-Fi.
 
 `sce_sys/` describes the package metadata. `vita-mksfoex` generates
 `build/sce_sys/param.sfo`; the VPK contains it at `sce_sys/param.sfo` alongside
@@ -85,9 +98,18 @@ completion, until Cross exits. Relaunch is required to rerun the tests.
 The 1 MiB Net pool, 128 KiB matching pool, packet tracking, and two 4 KiB stream
 buffers belong to the application. There is no application allocation in the
 packet loop. Socket receive buffers are requested at creation (32 KiB PDP,
-16 KiB PTP); SDK internals manage those allocations. GXM is initialized only for
-the system dialog; app text is CPU-blitted into a CDRAM framebuffer. The simple
-single-buffer display can tear.
+16 KiB PTP); SDK internals manage those allocations. GXM uses the SDK-default
+16 MiB parameter buffer and a one-entry display queue. Two 2.25 MiB CDRAM
+framebuffers alternate between CPU-painted text/system-dialog rendering and
+display. Each has its own GXM sync object. The 10 Hz diagnostic UI drains the
+previous display callback before painting the retired buffer; callbacks wait for
+the next vblank. These waits are included in measured RTT.
+
+If graphics initialization fails after the first framebuffer is available, a
+CPU-only error screen reports the failed setup and waits for Cross. Submission
+or display failures stop the test. If retirement cannot be established, graphics
+allocations are left for process teardown instead of freeing memory that may
+still be in use. Successful UI calls are not logged every frame.
 
 ## Exact SDK choices and missing APIs
 
@@ -118,12 +140,12 @@ These choices were checked against the installed Vita SDK headers and archives:
 
 ## Runtime XNet/Winsock mapping
 
-The Phase 3 runtime will need guest socket/port-to-PDP/PTP tables, XNet address and
-session-to-MAC translation, broadcast/lobby discovery, error and nonblocking
-semantics, bounded runtime-owned buffers, power servicing and disconnect/rejoin
-handling. This tool does not implement XNet key exchange or a game lobby.
-Native matching's IP-address API needs separate validation before using it as the
-runtime discovery layer.
+The [opt-in Xita transport](../../docs/adhoc.md) now implements guest socket/port
+mapping to PDP/PTP, XNet address-to-MAC translation, broadcast routing, bounded
+buffers and cooperative waits. Its host tests pass; two-Vita lobby discovery and
+gameplay remain unverified. This standalone tool tests firmware connectivity and
+does not implement XNet key exchange or a Halo lobby. Native matching's IP-address
+API is diagnostic only and is not used by Xita's runtime discovery layer.
 
 Header functions used by this test, with their prospective roles:
 
@@ -171,6 +193,6 @@ Header functions used by this test, with their prospective roles:
 
 `screen.c` also uses `sceCommonDialogConfigParamInit`,
 `sceCommonDialogSetConfigParam`, and `sceCommonDialogUpdate` to configure/render
-the connection dialog, with GXM initialization, memory mapping and a sync object.
+the connection dialog, with GXM initialization, memory mapping and per-buffer sync objects.
 The renderer, controller and append-only file logging are standalone diagnostic
 support, not Winsock mappings.

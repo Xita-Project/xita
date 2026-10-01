@@ -36,7 +36,7 @@ struct VertOut
     float4 position    : POSITION;   // oPos
     float4 color0      : COLOR0;   // oD0
     float4 color1      : COLOR1;   // oD1
-    float  fog         : FOG;   // oFog
+    float  fog         : TEXCOORD7;   // oFog
     float4 texcoord0   : TEXCOORD0;   // oT0
     float4 texcoord1   : TEXCOORD1;   // oT1
     float4 texcoord2   : TEXCOORD2;   // oT2

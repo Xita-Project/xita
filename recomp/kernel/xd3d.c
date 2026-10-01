@@ -14,6 +14,10 @@
 #include <math.h>
 #include "xk.h"
 #include "xd3d.h"
+#include "xk_flare.h"
+extern void xv_flare_barrier(unsigned) __attribute__((weak));
+extern void xv_flare_report(unsigned) __attribute__((weak));
+#include "../../runtime/xv_visibility.h"
 
 #define D3DLOG(...) xk_os_log("[d3d] " __VA_ARGS__)
 
@@ -76,9 +80,20 @@ static uint32_t new_header(uint32_t type, unsigned size)
 
 /* ---- device ------------------------------------------------------------------------------------ */
 xd3d_state_t xd3d_state;
+static int ps_synced;
+/* NV2A has 136 instruction slots. Halo preloads VS 10/9/27 and switches
+ * between them with SelectVertexShader(0, address). A null handle preserves
+ * the declaration; it does not disable the selected resident program. */
+#define XD3D_VS_SLOTS 136u
+static uint32_t g_vs_program[XD3D_VS_SLOTS];
+static uint16_t g_vs_owner[XD3D_VS_SLOTS]; /* start + 1, zero = never loaded */
+static uint16_t g_vs_length[XD3D_VS_SLOTS];
 static struct { uint32_t prim; unsigned verts, begins_in_frame, setdata_in_frame; } g_im;
 static float g_im_cur[16][4];
 static xd3d_im_vtx g_im_v[1024];
+static int g_im_passthrough;
+int xd3d_im_passthrough(void) { return g_im_passthrough; }
+const float (*xd3d_current_attributes(void))[4] { return g_im_cur; }
 /* Per-frame histogram of HLE entry points (host: XV_D3D_HIST=<frame> logs that frame's counts; also
  * dumped once on the Vita when the log asks).  Cheap enough to leave in: one strcmp-free table walk. */
 #define XD3D_HIST_MAX 128
@@ -109,7 +124,10 @@ static void im_set2(const char *src, unsigned reg, float x, float y, float z, fl
 {
     static unsigned dbg;
     if (dbg < 30 && xd3d_frame() > 0) { dbg++; xk_os_log("[im] %s r%u = %.2f %.2f %.2f %.2f\n", src, reg & 15, x, y, z, w); }
-    reg &= 15;
+    /* XDK 3925 SetVertexData4f(-1, ...) emits NV097_SET_VERTEX4F (0x1518),
+     * a completed, already transformed vertex. It is not attribute register 15. */
+    if (reg == UINT32_MAX) { reg = 0; g_im_passthrough = 1; }
+    else if (reg >= 16) return;
     g_im_cur[reg][0] = x; g_im_cur[reg][1] = y; g_im_cur[reg][2] = z; g_im_cur[reg][3] = w;
     if (reg == 0 && g_im.verts < 1024) memcpy(&g_im_v[g_im.verts++], g_im_cur, sizeof g_im_cur);   /* writing v0 completes a vertex */
     g_im.setdata_in_frame++;
@@ -117,6 +135,7 @@ static void im_set2(const char *src, unsigned reg, float x, float y, float z, fl
 #define im_set(...) im_set2("?", __VA_ARGS__)
 static float f32arg(xctx *c, unsigned i) { float f; uint32_t v = X_ARG(i); memcpy(&f, &v, 4); return f; }
 static struct { uint32_t vblank_cb, swap_cb; unsigned frame, draws, draws_total, clears; uint32_t backbuffer, depth; unsigned width, height; } g_dev;
+uint32_t xd3d_backbuffer_data(void) { return g_dev.backbuffer ? RES_DATA(g_dev.backbuffer) : 0; }
 static int g_hist_frame = -2;
 static float g_vp_rows[4][4]; static unsigned g_vp_frame = 0xFFFFFFFFu;   /* view-projection of the frame's first world draw */
 static struct { uint32_t m; unsigned n; uint32_t last; } g_hm[128]; static unsigned g_nhm;   /* NV2A methods poked in the hist frame */
@@ -141,7 +160,10 @@ void xd3d_hist_arm(void) { g_hist_frame = (int)g_dev.frame + 1; D3DLOG("hist: ar
 int xd3d_hist_active(void)
 {
     if (g_hist_frame == -2) { const char *e = getenv("XV_D3D_HIST"); g_hist_frame = e ? atoi(e) : -1; }
-    return g_hist_frame >= 0 && (int)g_dev.frame + 1 == g_hist_frame;   /* the frame Present will number hist_frame */
+    static unsigned count;
+    if (!count) { const char *e = getenv("XV_D3D_HIST_COUNT"); int n = e ? atoi(e) : 1; count = n > 0 && n <= 120 ? (unsigned)n : 1; }
+    return g_hist_frame >= 0 && g_dev.frame + 1 >= (unsigned)g_hist_frame &&
+           g_dev.frame + 1 - (unsigned)g_hist_frame < count;
 }
 
 void xd3d_r_present(unsigned frame, unsigned draws) __attribute__((weak));
@@ -162,7 +184,7 @@ void xd3d_r_draw(xctx *c, int indexed, uint32_t prim, uint32_t count, uint32_t d
 {
     (void)c;
     static unsigned logged; if (logged++ >= 40) return;
-    uint32_t vs = xd3d_state.vs_handle, fnv = (vs & 1) ? X_M32((vs & ~1u) + 12) : 0;
+    uint32_t vs = xd3d_state.vs_program, fnv = (vs & 1) ? X_M32((vs & ~1u) + 12) : 0;
     D3DLOG("Draw%s(prim %u, n %u, %08X) vs %08X%s%s fnv %08X vb %08X+%u tex %08X ps %08X cull %u z %u\n",
            indexed ? "Idx" : "", prim, count, data, vs, (vs & 1) ? "" : " FVF", "", fnv,
            xd3d_state.stream_vb[0] ? X_M32(xd3d_state.stream_vb[0] + 4) : 0, xd3d_state.stream_stride[0],
@@ -190,16 +212,25 @@ unsigned xd3d_pad_frame(void)
     return 1000000u + (g_dev.frame - g_pad_origin);
 }
 
-static void call_guest(xctx *c, uint32_t fn, uint32_t arg)   /* stdcall callback with one argument */
+static void call_guest(xctx *c, uint32_t fn, uint32_t arg)
 {
+    /* This host boundary owns the callback's argument and return slot. Halo's
+     * vblank callback (0xBB4E0) ends in plain RET, leaving the argument behind;
+     * other callbacks use RET 4. Restore the entry SP for both conventions.
+     * Otherwise vblank leaks 240 bytes/s, eventually writing through unrelated
+     * guest memory below its stack (including map-resident model vertices). */
+    uint32_t sp = c->r[4];
     X_PUSH32(arg); X_PUSH32(0xDEAD0010u); xv_call(c, fn);
+    c->r[4] = sp;
 }
 
 /* HRESULT Direct3D_CreateDevice(Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface) */
 void xv_hle_Direct3D_CreateDevice(xctx *c)
 { XD3D_COUNT("Direct3D_CreateDevice"); xd3d_state.color_mask = 0x01010101u;
+    xd3d_state.stencil = xv_stencil_default();
     uint32_t pp = X_ARG(4);
     if (!g_xd3d_device) {
+        for (unsigned i = 0; i < 16; i++) g_im_cur[i][3] = 1.0f;
         g_xd3d_device = xk_kalloc(DEVICE_SIZE);
         g_dev.width = pp ? X_M32(pp) : 640; g_dev.height = pp ? X_M32(pp + 4) : 480;
         if (!g_dev.width) g_dev.width = 640; if (!g_dev.height) g_dev.height = 480;
@@ -325,30 +356,6 @@ static void vblank_thread(xctx *c, void *arg)
         while (fired < due) { vblank_fire(c); fired++; }
     }
 }
-/* Cutscene-skip camera recovery.  Skipping a cinematic fast-forwards its script but the closing
- * camera_control(off) never runs, so the director mode pointer (0x271100) stays on the scripted camera
- * (0x120A90) and the view is left at the cutscene shot instead of returning to first person - the
- * Keyes/Chief bug.  camera_control is guest f_0011FFD0 (stdcall, one arg: on=scripted, off=restore
- * first person/seat).  When the player is in control and the scripted camera has sat with its transition
- * finished for a while (not an active multi-shot cinematic, which keeps resetting the transition), call
- * the game's own camera_control(off) once to hand the camera back.  XV_CAM_FIX=0 disables it. */
-static void xd3d_cam_recover(xctx *c)
-{
-    static int on = -1; if (on < 0) { const char *e = getenv("XV_CAM_FIX"); on = e ? atoi(e) : 1; }
-    if (!on) return;
-    static unsigned stuck; static int armed = 1;
-    uint32_t vt  = X_M32(0x271100u);
-    uint32_t pl  = X_M32(0x276794u);
-    uint32_t unit = pl ? X_M32(pl + 0x10) : 0xFFFFFFFFu;
-    if (vt != 0x120A90u || pl == 0 || unit == 0xFFFFFFFFu) { stuck = 0; armed = 1; return; }
-    float trans; { uint32_t w = X_M32(0x271150u + 0x60u); memcpy(&trans, &w, 4); }   /* observer transition countdown */
-    if (trans > 0.05f) { stuck = 0; return; }                                        /* a cinematic shot is still moving */
-    if (++stuck < 60u) return;                                                        /* ~2 s settled on the scripted cam */
-    if (!armed) return;
-    armed = 0; stuck = 0;
-    D3DLOG("cam recover: scripted camera stuck with player in control -> camera_control(off)\n");
-    call_guest(c, 0x0011FFD0u, 0u);
-}
 void xv_hle_D3DDevice_SetVerticalBlankCallback(xctx *c)
 { XD3D_COUNT("D3DDevice_SetVerticalBlankCallback");
     static int started;
@@ -362,27 +369,56 @@ void xv_hle_D3DDevice_SetSoftDisplayFilter(xctx *c) { XD3D_COUNT("D3DDevice_SetS
 void xv_hle_D3DDevice_SetShaderConstantMode(xctx *c) { XD3D_COUNT("D3DDevice_SetShaderConstantMode"); D3DLOG("SetShaderConstantMode(%08X)\n", X_ARG(0)); xd3d_state.const_mode = X_ARG(0); X_RET(1); }
 void xv_hle_D3DDevice_GetBackBuffer(xctx *c) { XD3D_COUNT("D3DDevice_GetBackBuffer"); RES_COMMON(g_dev.backbuffer)++; X_M32(X_ARG(2)) = g_dev.backbuffer; c->r[0] = 0; X_RET(3); }
 void xv_hle_D3DDevice_GetDepthStencilSurface(xctx *c) { XD3D_COUNT("D3DDevice_GetDepthStencilSurface"); RES_COMMON(g_dev.depth)++; X_M32(X_ARG(0)) = g_dev.depth; c->r[0] = 0; X_RET(1); }
-/* Halo renders a few passes into offscreen surfaces (render-to-texture: SetRenderTarget(surface, NULL), Clear
- * colour, draw, back to the backbuffer).  Without real render targets every one of those clears wiped the
- * backbuffer mid-frame - the a10 cryo bay's lighting passes were cleared before the base-texture pass
- * modulated against them (black floor tiles).  Until offscreen targets exist, drop their clears and draws. */
+/* NULL retains the current color target. XV_DROP_RT=1 restores the diagnostic drop path. */
 int xd3d_offscreen_rt = 0;
-void xv_hle_D3DDevice_SetRenderTarget(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderTarget"); { uint32_t rt = X_ARG(0); int off = rt && rt != g_dev.backbuffer; if (off != xd3d_offscreen_rt) { static unsigned n; if (n++ < 6) D3DLOG("render target %08X: %s\n", rt, off ? "offscreen (draws dropped)" : "backbuffer"); } xd3d_offscreen_rt = off; } XD3D_RET("SetRenderTarget"); if (xd3d_hist_active()) D3DLOG("[hist] SetRenderTarget(%08X, %08X) backbuffer %08X depth %08X\n", X_ARG(0), X_ARG(1), g_dev.backbuffer, g_dev.depth); xd3d_r_state("SetRenderTarget", X_ARG(0), X_ARG(1), g_dev.backbuffer); X_RET(2); }
+static int xd3d_drop_rt(void)
+{
+    static int drop = -1;
+    if (drop < 0) { const char *e = getenv("XV_DROP_RT"); drop = e && atoi(e) == 1; }
+    return xd3d_offscreen_rt && drop;
+}
+void xv_hle_D3DDevice_SetRenderTarget(xctx *c)
+{
+    XD3D_COUNT("D3DDevice_SetRenderTarget");
+    if (X_ARG(0)) xd3d_offscreen_rt = X_ARG(0) != g_dev.backbuffer;
+    xd3d_r_state("SetRenderTarget", X_ARG(0), X_ARG(1), g_dev.backbuffer);
+    c->r[0] = 0; X_RET(2);
+}
 /* D3DVIEWPORT8 { X, Y, Width, Height, MinZ, MaxZ } */
 void xv_hle_D3DDevice_SetViewport(xctx *c)
 { XD3D_COUNT("D3DDevice_SetViewport");
     uint32_t v = X_ARG(0);
     xd3d_state.vp_x = X_M32(v); xd3d_state.vp_y = X_M32(v + 4); xd3d_state.vp_w = X_M32(v + 8); xd3d_state.vp_h = X_M32(v + 12);
     memcpy(&xd3d_state.vp_minz, X_G(v + 16), 4); memcpy(&xd3d_state.vp_maxz, X_G(v + 20), 4);
+    if (xd3d_hist_active()) D3DLOG("[hist] viewport XY %u %u WH %u %u depth %.6f %.6f\n",
+        xd3d_state.vp_x,xd3d_state.vp_y,xd3d_state.vp_w,xd3d_state.vp_h,xd3d_state.vp_minz,xd3d_state.vp_maxz);
     X_RET(1);
 }
 void xv_hle_D3DDevice_SetTransform(xctx *c) { XD3D_COUNT("D3DDevice_SetTransform"); X_RET(2); }
 void xv_hle_D3DDevice_GetTransform(xctx *c) { XD3D_COUNT("D3DDevice_GetTransform"); memset(X_G(X_ARG(1)), 0, 64); X_MF32(X_ARG(1)) = X_MF32(X_ARG(1) + 20) = X_MF32(X_ARG(1) + 40) = X_MF32(X_ARG(1) + 60) = 1.0f; X_RET(2); }
 
+/* Read-only camera signature for the resolution comparison. */
+int xd3d_benchmark_view(float view[6])
+{
+    uint32_t gg=X_M32(0x2F8CA0u);
+    if(xk_file_in_ui_map||!gg||!X_M8(gg)||!X_M8(gg+1)||X_M8(gg+2)||
+       X_M32(0x2E4000u)||X_M32(0x271100u)!=0x11E750u||g_vp_frame!=g_dev.frame-1u)return 0;
+    const float (*m)[4]=g_vp_rows;
+    for(unsigned i=0;i<3;i++) {
+        view[i]=0;view[i+3]=m[2][i];
+        for(unsigned row=0;row<3;row++) {
+            float norm=m[row][0]*m[row][0]+m[row][1]*m[row][1]+m[row][2]*m[row][2];
+            view[i]-=m[row][i]*m[row][3]/(norm+1e-9f);
+        }
+        if(!isfinite(view[i])||!isfinite(view[i+3]))return 0;
+    }
+    return 1;
+}
+
 /* Present / Swap: fire callbacks, count the frame */
 void xv_hle_D3DDevice_Present(xctx *c)
 { XD3D_COUNT("D3DDevice_Present");
-    xd3d_cam_recover(c);
+    if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_PRESENT);
     lockstep_init();
     if (xd3d_lockstep > 0) {                /* 30 fps cap: one simulation tick per frame at the right speed */
         static uint64_t next; uint64_t now = xk_os_monotonic_us();
@@ -392,7 +428,7 @@ void xv_hle_D3DDevice_Present(xctx *c)
     g_dev.frame++;
     hist_level_track();
     xd3d_r_present(g_dev.frame, g_dev.draws);
-    if (g_dev.frame % 60 == 0) { uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
+    if (g_dev.frame % 60 == 0) { if (xv_flare_report) xv_flare_report(60); uint32_t gg = X_M32(0x2F8CA0); float pct = 0; float campos[3] = { 0, 0, 0 }, camfwd[3] = { 0, 0, 0 };
         {   /* camera from the view-projection rows c[-96..-93] of the frame's first depth-tested world draw */
             const float (*m)[4] = g_vp_rows;
             for (int i = 0; i < 3; ++i) { camfwd[i] = m[2][i];
@@ -437,27 +473,122 @@ void xv_hle_D3DDevice_Present(xctx *c)
     xk_yield();
     c->r[0] = 0; X_RET(4);
 }
-void xv_hle_D3DDevice_Swap(xctx *c) { XD3D_COUNT("D3DDevice_Swap"); g_dev.frame++; xd3d_r_present(g_dev.frame, g_dev.draws); g_dev.draws = 0; g_dev.clears = 0; xk_yield(); c->r[0] = 0; X_RET(1); }
+void xv_hle_D3DDevice_Swap(xctx *c) { XD3D_COUNT("D3DDevice_Swap"); if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_PRESENT); g_dev.frame++; xd3d_r_present(g_dev.frame, g_dev.draws); g_dev.draws = 0; g_dev.clears = 0; xk_yield(); c->r[0] = 0; X_RET(1); }
 void xd3d_r_clear(uint32_t flags, uint32_t color, float z, uint32_t stencil) __attribute__((weak));
 void xd3d_r_clear(uint32_t flags, uint32_t color, float z, uint32_t stencil) { (void)flags; (void)color; (void)z; (void)stencil; }
 /* D3DDevice_Clear(Count, pRects, Flags, Color, Z, Stencil) */
-void xv_hle_D3DDevice_Clear(xctx *c) { XD3D_COUNT("D3DDevice_Clear"); g_dev.clears++; float z; uint32_t zi = X_M32(c->r[4] + 4 + 16); memcpy(&z, &zi, 4); if (!xd3d_offscreen_rt) xd3d_r_clear(X_ARG(2), X_ARG(3), z, X_ARG(5)); c->r[0] = 0; X_RET(6); }
-void xv_hle_D3DDevice_BeginVisibilityTest(xctx *c) { XD3D_COUNT("D3DDevice_BeginVisibilityTest"); c->r[0] = 0; X_RET(0); }
-void xv_hle_D3DDevice_EndVisibilityTest(xctx *c) { XD3D_COUNT("D3DDevice_EndVisibilityTest"); c->r[0] = 0; X_RET(1); }
-void xv_hle_D3DDevice_GetVisibilityTestResult(xctx *c) { XD3D_COUNT("D3DDevice_GetVisibilityTestResult"); if (X_ARG(1)) X_M32(X_ARG(1)) = 1; if (X_ARG(2)) X_M64(X_ARG(2)) = 0; c->r[0] = 0; X_RET(3); }
+void xv_hle_D3DDevice_Clear(xctx *c) { XD3D_COUNT("D3DDevice_Clear"); g_dev.clears++; float z; uint32_t zi = X_M32(c->r[4] + 4 + 16); memcpy(&z, &zi, 4); if (!xd3d_drop_rt()) xd3d_r_clear(X_ARG(2), X_ARG(3), z, X_ARG(5)); c->r[0] = 0; X_RET(6); }
+void xd3d_r_visibility_begin(uint32_t w, uint32_t h) __attribute__((weak));
+uint32_t xd3d_r_visibility_end(uint32_t id) __attribute__((weak));
+uint32_t xd3d_r_visibility_result(uint32_t id, uint32_t *pixels) __attribute__((weak));
+uint32_t xd3d_r_visibility_result_stale(uint32_t id, uint32_t *pixels, uint32_t *behind) __attribute__((weak));
+uint32_t xd3d_r_visibility_result_stale(uint32_t id, uint32_t *pixels, uint32_t *behind) { (void)id; (void)pixels; (void)behind; return XV_VISIBILITY_INCOMPLETE; }
+void xd3d_r_visibility_begin(uint32_t w, uint32_t h) { (void)w; (void)h; }
+uint32_t xd3d_r_visibility_end(uint32_t id) { (void)id; return 0; }
+uint32_t xd3d_r_visibility_result(uint32_t id, uint32_t *pixels)
+{ (void)id; *pixels=0; return 0; }
+int xd3d_r_visibility_wait(uint32_t id,uint32_t timeout_us,uint32_t *age,uint32_t *render_us) __attribute__((weak));
+int xd3d_r_visibility_wait(uint32_t id,uint32_t timeout_us,uint32_t *age,uint32_t *render_us)
+{ (void)id;(void)timeout_us;(void)age;(void)render_us;return 0; }
+static unsigned visibility_retry_id, visibility_retry_frame, visibility_retries;
+static xk_thread *visibility_retry_thread;
+static int visibility_retry_valid;
+void xv_hle_D3DDevice_BeginVisibilityTest(xctx *c)
+{ XD3D_COUNT("D3DDevice_BeginVisibilityTest"); if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_QUERY); xd3d_r_visibility_begin(xd3d_state.vp_w,xd3d_state.vp_h); c->r[0]=0; X_RET(0); }
+void xv_hle_D3DDevice_EndVisibilityTest(xctx *c)
+{ XD3D_COUNT("D3DDevice_EndVisibilityTest"); if (xv_flare_barrier) xv_flare_barrier(XV_FLARE_QUERY); visibility_retry_valid=0; c->r[0]=xd3d_r_visibility_end(X_ARG(0)); X_RET(1); }
+void xv_hle_D3DDevice_GetVisibilityTestResult(xctx *c)
+{
+    XD3D_COUNT("D3DDevice_GetVisibilityTestResult");
+    static unsigned reads, pending, delayed, ready_after_wait, last_report;
+    static uint64_t requested_wait_us;
+    static unsigned event_waits, timed_ready, max_resume_us;
+    static uint64_t event_elapsed_us, resume_us, render_elapsed_us;
+    reads++;
+    uint32_t id=X_ARG(0), pixels=0, result=xd3d_r_visibility_result(id,&pixels);
+    static unsigned stale_served; static uint32_t stale_max_behind;
+    if (result == XV_VISIBILITY_INCOMPLETE) {
+        /* Opt-in approximation under investigation. Query IDs are list indices;
+         * reuse does not prove the previous count belongs to the same flare.
+         * Keep exact completion until identity and result age are validated. */
+        static int stale=-1; if (stale<0) { const char *e=getenv("XV_VIS_STALE"); stale=e?atoi(e):0; }
+        uint32_t behind=0;
+        if (stale && xd3d_r_visibility_result_stale(id,&pixels,&behind)==0) { result=0; stale_served++; if (behind>stale_max_behind) stale_max_behind=behind; }
+    }
+    if (result == XV_VISIBILITY_INCOMPLETE) {
+        pending++;
+        /* Park only this guest fiber while the pump owns the result. Other
+         * guest fibers remain runnable, and the scheduler can sleep if idle.
+         * Never fabricate a completed count or consume an older generation. */
+        static int poll_us = -1, backoff, events;
+        if (poll_us < 0) {
+            const char *e = getenv("XV_VISIBILITY_POLL_US");
+            poll_us = e ? atoi(e) : 100;
+            if (poll_us < 0) poll_us = 0;
+            if (poll_us > 1000) poll_us = 1000;
+            e=getenv("XV_VISIBILITY_BACKOFF"); backoff=!e || atoi(e)!=0;
+            e=getenv("XV_VISIBILITY_EVENTS"); events=!e || atoi(e)!=0;
+            D3DLOG("visibility polling: cooperative delay %d us, bounded backoff %s\n", poll_us,backoff?"on":"off");
+            D3DLOG("visibility completion waits: %s (100 ms bounded wait for submitted queries)\n",events?"on":"off");
+        }
+        uint32_t age=UINT32_MAX, render_us=0;
+        uint64_t started=xk_os_monotonic_us();
+        if (events && xd3d_r_visibility_wait(id,100000,&age,&render_us)) {
+            event_waits++;event_elapsed_us+=xk_os_monotonic_us()-started;
+            if (age!=UINT32_MAX) {
+                timed_ready++;resume_us+=age;render_elapsed_us+=render_us;
+                if(age>max_resume_us)max_resume_us=age;
+            }
+        } else {
+        if (!visibility_retry_valid || visibility_retry_id!=id || visibility_retry_frame!=g_dev.frame || visibility_retry_thread!=xk_cur)
+            visibility_retries=0;
+        visibility_retry_valid=1; visibility_retry_id=id; visibility_retry_frame=g_dev.frame; visibility_retry_thread=xk_cur;
+        unsigned delay=(unsigned)poll_us;
+        if (backoff) {
+            delay <<= visibility_retries;
+            if (delay>1000) delay=1000;
+            if (visibility_retries<4) visibility_retries++;
+        }
+        if (delay) { delayed++; requested_wait_us+=delay; xk_sleep_us(delay); }
+        else xk_yield();
+        }
+        /* The GPU may have completed during the cooperative wait. Re-read the
+         * current generation instead of making Halo loop through another call. */
+        result=xd3d_r_visibility_result(id,&pixels);
+        if (!result) ready_after_wait++;
+    }
+    if (result!=XV_VISIBILITY_INCOMPLETE) visibility_retry_valid=0;
+    if (!result) {
+        if (X_ARG(1)) x_guest_write(X_ARG(1),&pixels,sizeof pixels);
+        uint64_t stamp=0;
+        if (X_ARG(2)) x_guest_write(X_ARG(2),&stamp,sizeof stamp);
+    }
+    if ((uint32_t)(g_dev.frame - last_report) >= 60) {
+        D3DLOG("[visibility-poll] frames %u..%u reads %u pending %u delayed %u ready-after-wait %u requested-us %llu\n",
+            last_report, g_dev.frame, reads, pending, delayed,ready_after_wait,(unsigned long long)requested_wait_us);
+        D3DLOG("[visibility-wait] frames %u..%u waits %u ready %u elapsed-us %llu resume-us %llu max-resume-us %u render-us %llu\n",
+            last_report,g_dev.frame,event_waits,timed_ready,(unsigned long long)event_elapsed_us,
+            (unsigned long long)resume_us,max_resume_us,(unsigned long long)render_elapsed_us);
+        D3DLOG("[visibility-stale] frames %u..%u served %u max-behind %u generations\n", last_report, g_dev.frame, stale_served, stale_max_behind);
+        stale_served=0; stale_max_behind=0;
+        event_waits=timed_ready=max_resume_us=0;event_elapsed_us=resume_us=render_elapsed_us=0;
+        reads = pending = delayed = ready_after_wait = 0; requested_wait_us=0; last_report = g_dev.frame;
+    }
+    c->r[0]=result; X_RET(3);
+}
 
 /* ---- draws & state ---------------------------------------------------------------------------- */
-void xv_hle_D3DDevice_DrawVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawVertices"); g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_offscreen_rt) xd3d_r_draw(c, 0, X_ARG(0), X_ARG(2), X_ARG(1)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
+void xv_hle_D3DDevice_DrawVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawVertices"); g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_drop_rt()) xd3d_r_draw(c, 0, X_ARG(0), X_ARG(2), X_ARG(1)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
 char xd3d_last_stack[400];
 void xv_hle_D3DDevice_DrawIndexedVertices(xctx *c) { XD3D_COUNT("D3DDevice_DrawIndexedVertices");
     if (g_vp_frame != g_dev.frame && xd3d_state.z_enable) { g_vp_frame = g_dev.frame; memcpy(g_vp_rows, xd3d_state.vsc, sizeof g_vp_rows); }
     if (xd3d_hist_active()) {                                         /* caller chain of every draw in the traced frame */
         char sb[400]; int k = 0; uint32_t esp = c->r[4];
         for (unsigned j = 0; j < 96 && k < 380; ++j) { uint32_t w = X_M32(esp + 4 * j); if (w >= 0x11000 && w < 0x3A0000) k += snprintf(sb + k, sizeof sb - k, " %X", w); }
-        D3DLOG("[hist] drawcall prim %u n %u stack:%s\n", X_ARG(0), X_ARG(1), sb);
+        D3DLOG("[hist] drawcall prim %u n %u vs %08X program %08X stack:%s\n", X_ARG(0), X_ARG(1), xd3d_state.vs_handle, xd3d_state.vs_program, sb);
         strncpy(xd3d_last_stack, sb, sizeof xd3d_last_stack - 1);
     }
-    g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_offscreen_rt) xd3d_r_draw(c, 1, X_ARG(0), X_ARG(1), X_ARG(2)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
+    g_dev.draws++; g_dev.draws_total++; { uint64_t t0 = xk_os_monotonic_us(); if (!xd3d_drop_rt()) xd3d_r_draw(c, 1, X_ARG(0), X_ARG(1), X_ARG(2)); xv_t_draw_us += xk_os_monotonic_us() - t0; } c->r[0] = 0; X_RET(3); }
 void xv_hle_D3DDevice_Begin(xctx *c)
 { XD3D_COUNT("D3DDevice_Begin");
     { static int done; if (!done && xd3d_frame() > 1 && X_ARG(0) == 7 && getenv("XV_STACKDUMP")) {
@@ -467,7 +598,7 @@ void xv_hle_D3DDevice_Begin(xctx *c)
             if ((v >= 0x11000 && v < 0x180E40) || i < 4) xk_os_log("[stk] +%03X: %08X%s\n", i * 4, v, v >= 0x11000 && v < 0x180E40 ? "  <- code" : "");
         }
     } }
-    g_im.prim = X_ARG(0); g_im.verts = 0; g_im.begins_in_frame++; c->r[0] = 0; X_RET(1);
+    g_im.prim = X_ARG(0); g_im.verts = 0; g_im_passthrough = 0; g_im.begins_in_frame++; c->r[0] = 0; X_RET(1);
 }
 void xv_hle_D3DDevice_End(xctx *c)
 { XD3D_COUNT("D3DDevice_End");
@@ -504,6 +635,11 @@ void xv_hle_D3DDevice_SetStreamSource(xctx *c) { XD3D_COUNT("D3DDevice_SetStream
  * The HLE has to keep those mirrors current or the game computes pointers from zero. */
 #define D3D_G_INDEXDATA     0x0018F17Cu
 #define D3D_G_TEXTURESTATE  0x0018F180u
+uint32_t xd3d_texture_state(unsigned stage, unsigned state)
+{
+    if (stage >= 4 || state >= 32) return 0;
+    return X_M32(D3D_G_TEXTURESTATE + (stage * 32 + state) * 4);
+}
 #define D3D_G_RENDERSTATE   0x0018F380u
 void xv_hle_D3DDevice_SetIndices(xctx *c) { XD3D_COUNT("D3DDevice_SetIndices"); XD3D_RET("SetIndices"); xd3d_state.indices = X_ARG(0); xd3d_state.index_base = X_ARG(1);
     X_M32(D3D_G_INDEXDATA) = X_ARG(0) ? X_M32(X_ARG(0) + 4) : 0;
@@ -545,6 +681,7 @@ static int ps_method_to_def(uint32_t m);
 static void rs_method(uint32_t method, uint32_t v)
 {
     uint32_t m = method & 0x1FFC;
+    xv_stencil_method(&xd3d_state.stencil, m, v);
     switch (m) {
     case 0x300: xd3d_state.alpha_test = v; break;      /* NV097_SET_ALPHA_TEST_ENABLE */
     case 0x304: xd3d_state.alpha_blend = v; break;     /* NV097_SET_BLEND_ENABLE */
@@ -557,9 +694,11 @@ static void rs_method(uint32_t method, uint32_t v)
     case 0x350: xd3d_state.blend_op = v; break;
     case 0x354: xd3d_state.z_func = v; break;
     case 0x35C: xd3d_state.z_write = v; break;
-    default: { int off = ps_method_to_def(m); if (off >= 0) { xd3d_state.ps_shadow[off / 4] = v; xd3d_state.ps_dirty = 1; } } break;
+    default: { int off = ps_method_to_def(m); if (off >= 0 && (!ps_synced || xd3d_state.ps_shadow[off / 4] != v)) { xd3d_state.ps_shadow[off / 4] = v; xd3d_state.ps_dirty = 1; } } break;
     }
-    { static unsigned n; if (n < 40 && getenv("XV_LOG_RS")) { n++; xk_os_log("[rs] method %08X value %08X\n", method, v); } }
+    { static unsigned n; static int log_rs=-1;
+      if (log_rs<0) log_rs=getenv("XV_LOG_RS")!=NULL;
+      if (log_rs && n<40) { n++; xk_os_log("[rs] method %08X value %08X\n", method, v); } }
     if (xd3d_hist_active()) {                          /* which NV2A methods the game pokes directly this frame */
         unsigned i;
         for (i = 0; i < g_nhm; ++i) if (g_hm[i].m == m) break;
@@ -568,7 +707,11 @@ static void rs_method(uint32_t method, uint32_t v)
     }
 }
 void xv_hle_D3DDevice_SetRenderState_Simple(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderState_Simple"); rs_method(c->r[1], c->r[2]); X_RET(0); }
-void xv_hle_D3DDevice_SetTextureStageStateNotInline(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureStageStateNotInline"); c->r[0] = 0; X_RET(3); }
+void xv_hle_D3DDevice_SetTextureStageStateNotInline(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureStageStateNotInline");
+    if (X_ARG(0) < 4 && X_ARG(1) < 32)
+        X_M32(D3D_G_TEXTURESTATE + (X_ARG(0) * 32 + X_ARG(1)) * 4) = X_ARG(2);
+    c->r[0] = 0; X_RET(3);
+}
 void xv_hle_D3DDevice_SetTextureState_TexCoordIndex(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_TexCoordIndex"); X_RET(2); }
 void xv_hle_D3DDevice_SetTextureState_BorderColor(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_BorderColor"); X_RET(2); }
 void xv_hle_D3DDevice_SetTextureState_ColorKeyColor(xctx *c) { XD3D_COUNT("D3DDevice_SetTextureState_ColorKeyColor"); X_RET(2); }
@@ -591,8 +734,16 @@ void xv_hle_D3DDevice_SetRenderState_CullMode(xctx *c) { XD3D_COUNT("D3DDevice_S
    render-state table (no 0x2A8 in it) - so a no-op stub here left the fog black. */
 void xv_hle_D3DDevice_SetRenderState_FogColor(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderState_FogColor"); uint32_t v = X_ARG(0); if (v != xd3d_state.fog_color) { xd3d_state.fog_color = v; static unsigned n; if (n++ < 8) D3DLOG("fog color %08X\n", v); } X_RET(1); }
 RS1(FrontFace) RS1(LineWidth) RS1(LogicOp) RS1(MultiSampleAntiAlias) RS1(MultiSampleMask) RS1(MultiSampleType) RS1(NormalizeNormals)
-RS1(OcclusionCullEnable) RS1(PSTextureModes) RS1(RopZCmpAlwaysRead) RS1(RopZRead) RS1(ShadowFunc) RS1(StencilCullEnable)
-RS1(StencilEnable) RS1(StencilFail) RS1(TextureFactor) RS1(TwoSidedLighting) RS1(VertexBlend) RS1(YuvEnable) RS1(ZBias)
+RS1(OcclusionCullEnable) RS1(RopZCmpAlwaysRead) RS1(RopZRead) RS1(ShadowFunc) RS1(StencilCullEnable)
+void xv_hle_D3DDevice_SetRenderState_PSTextureModes(xctx *c) {
+    XD3D_COUNT("D3DDevice_SetRenderState_PSTextureModes");
+    rs_method(0x1E70, X_ARG(0)); X_RET(1);
+}
+void xv_hle_D3DDevice_SetRenderState_StencilEnable(xctx *c)
+{ XD3D_COUNT("D3DDevice_SetRenderState_StencilEnable"); rs_method(0x32c, X_ARG(0)); X_RET(1); }
+void xv_hle_D3DDevice_SetRenderState_StencilFail(xctx *c)
+{ XD3D_COUNT("D3DDevice_SetRenderState_StencilFail"); rs_method(0x370, X_ARG(0)); X_RET(1); }
+ RS1(TextureFactor) RS1(TwoSidedLighting) RS1(VertexBlend) RS1(YuvEnable) RS1(ZBias)
 void xv_hle_D3DDevice_SetRenderState_ZEnable(xctx *c) { XD3D_COUNT("D3DDevice_SetRenderState_ZEnable"); xd3d_state.z_enable = X_ARG(0); X_RET(1); }
 
 /* ---- vertex / pixel shaders ------------------------------------------------------------------ */
@@ -604,17 +755,70 @@ void xv_hle_D3DDevice_CreateVertexShader(xctx *c)
     uint32_t sh = xk_kalloc(64);                 /* guest-visible shader object: { decl, func, size, hash } */
     X_M32(sh) = decl; X_M32(sh + 4) = func;
     uint32_t size = 0, hash = 0;
-    if (func) { size = 4 + 16 * X_M8(func + 2); hash = fnv1a(X_G(func), size); }
+    if (func) { size = 4 + 16 * X_M16(func + 2); hash = fnv1a(X_G(func), size); }
     X_M32(sh + 8) = size; X_M32(sh + 12) = hash;
     X_M32(ph) = sh | 1;
     D3DLOG("CreateVertexShader(decl %08X, func %08X [%u B, fnv %08X]) -> %08X\n", decl, func, size, hash, sh | 1);
     c->r[0] = 0; X_RET(4);
 }
 void xv_hle_D3DDevice_DeleteVertexShader(xctx *c) { XD3D_COUNT("D3DDevice_DeleteVertexShader"); c->r[0] = 0; X_RET(1); }
-void xv_hle_D3DDevice_SetVertexShader(xctx *c) { XD3D_COUNT("D3DDevice_SetVertexShader"); XD3D_RET("SetVertexShader"); xd3d_state.vs_handle = X_ARG(0); c->r[0] = 0; X_RET(1); }
-void xv_hle_D3DDevice_SelectVertexShader(xctx *c) { XD3D_COUNT("D3DDevice_SelectVertexShader"); xd3d_state.vs_handle = X_ARG(0); c->r[0] = 0; X_RET(2); }
-void xv_hle_D3DDevice_LoadVertexShader(xctx *c) { XD3D_COUNT("D3DDevice_LoadVertexShader"); c->r[0] = 0; X_RET(2); }
-void xv_hle_D3DDevice_GetVertexShaderSize(xctx *c) { XD3D_COUNT("D3DDevice_GetVertexShaderSize"); uint32_t sh = X_ARG(0) & ~1u; if (X_ARG(1)) X_M32(X_ARG(1)) = (X_ARG(0) & 1) ? X_M32(sh + 8) : 0; X_RET(2); }
+static uint32_t vs_instruction_count(uint32_t handle)
+{
+    uint32_t bytes = (handle & 1) ? X_M32((handle & ~1u) + 8) : 0;
+    return bytes >= 4 ? (bytes - 4) / 16 : 0;
+}
+static void vs_load(uint32_t handle, uint32_t address)
+{
+    uint32_t count = vs_instruction_count(handle);
+    if (!count || address >= XD3D_VS_SLOTS || count > XD3D_VS_SLOTS - address) return;
+    if (g_vs_program[address] == handle) return; /* immutable program already resident */
+    for (uint32_t i = address; i < address + count; ++i) {
+        if (g_vs_owner[i]) {
+            uint32_t start = g_vs_owner[i] - 1;
+            /* A shorter replacement at the same start leaves old ownership
+             * tags beyond its end; those must not invalidate the new program. */
+            if (i < start + g_vs_length[start]) g_vs_program[start] = 0;
+        }
+        g_vs_owner[i] = (uint16_t)(address + 1);
+    }
+    g_vs_program[address] = handle;
+    g_vs_length[address] = (uint16_t)count;
+}
+void xv_hle_D3DDevice_SetVertexShader(xctx *c)
+{
+    XD3D_COUNT("D3DDevice_SetVertexShader"); XD3D_RET("SetVertexShader");
+    uint32_t handle = X_ARG(0);
+    xd3d_state.vs_handle = handle;
+    xd3d_state.vs_program = handle;
+    if (handle & 1) vs_load(handle, 0);
+    c->r[0] = 0; X_RET(1);
+}
+void xv_hle_D3DDevice_SelectVertexShader(xctx *c)
+{
+    XD3D_COUNT("D3DDevice_SelectVertexShader");
+    uint32_t handle = X_ARG(0), address = X_ARG(1);
+    if (handle) xd3d_state.vs_handle = handle;
+    xd3d_state.vs_program = address < XD3D_VS_SLOTS ? g_vs_program[address] : 0;
+    if (xd3d_hist_active()) D3DLOG("[hist] SelectVertexShader %08X address %u declaration %08X program %08X\n",
+        handle, address, xd3d_state.vs_handle, xd3d_state.vs_program);
+    c->r[0] = 0; X_RET(2);
+}
+void xv_hle_D3DDevice_LoadVertexShader(xctx *c)
+{
+    XD3D_COUNT("D3DDevice_LoadVertexShader");
+    vs_load(X_ARG(0), X_ARG(1));
+    if (xd3d_hist_active()) D3DLOG("[hist] LoadVertexShader %08X address %u instructions %u\n",
+        X_ARG(0), X_ARG(1), vs_instruction_count(X_ARG(0)));
+    c->r[0] = 0; X_RET(2);
+}
+void xv_hle_D3DDevice_GetVertexShaderSize(xctx *c)
+{
+    XD3D_COUNT("D3DDevice_GetVertexShaderSize");
+    /* Xbox 3925 returns the instruction count from the function header,
+     * not the byte length of our HLE shader object (GetVertexShaderSize 183C30). */
+    if (X_ARG(1)) X_M32(X_ARG(1)) = vs_instruction_count(X_ARG(0));
+    X_RET(2);
+}
 /* SetVertexShaderConstant(Register (-96..95), pConstantData, ConstantCount) */
 void xv_hle_D3DDevice_SetVertexShaderConstant(xctx *c)
 { XD3D_COUNT("D3DDevice_SetVertexShaderConstant");
@@ -647,10 +851,25 @@ static uint32_t psdef_hash(const uint8_t *d)
     }
     return h;
 }
+#include "../../runtime/xv_ps_key.h"
+#include "../../runtime/xv_ps_identity.h"
+static xv_ps_identity_cache ps_identity_cache;
+void xd3d_prepare_report(unsigned frames)
+{
+    D3DLOG("[draw-state-cache] %u frames lookups %u adjacent %u reused %u computed %u\n",
+        frames,ps_identity_cache.lookups,ps_identity_cache.adjacent_hits,
+        ps_identity_cache.table_hits,ps_identity_cache.misses);
+    ps_identity_cache.lookups=ps_identity_cache.adjacent_hits=0;
+    ps_identity_cache.table_hits=ps_identity_cache.misses=0;
+}
 static void psdef_load(uint32_t def)
 {
-    memcpy(xd3d_state.ps_shadow, X_G(def), 0xF0);
-    xd3d_state.ps_dirty = 1;
+    uint32_t incoming[0xF0/4];
+    x_guest_read(incoming,def,sizeof incoming);
+    if (!ps_synced || memcmp(xd3d_state.ps_shadow,incoming,sizeof incoming)) {
+        memcpy(xd3d_state.ps_shadow,incoming,sizeof incoming);
+        xd3d_state.ps_dirty = 1;
+    }
 }
 /* NV2A method (push-buffer offset) -> byte offset of the same field in X_D3DPIXELSHADERDEF, or -1.
  * D3DDevice_SetPixelShaderProgram writes exactly these registers from the def; Halo then patches
@@ -669,7 +888,7 @@ static int ps_method_to_def(uint32_t m)
     if (m == 0x1E24) return 0xB0;                                  /* SPECULAR_FOG_FACTOR1 final c1  */
     if (m >= 0x1E40 && m < 0x1E60) return 0xB4 + (m - 0x1E40);   /* COLOR_OCW[8]   PSRGBOutputs    */
     if (m == 0x1E60) return 0xD4;                                  /* COMBINER_CONTROL PSCombinerCount */
-    if (m == 0x1D90) return 0xD8;                                  /* SHADER_STAGE_PROGRAM PSTextureModes */
+    if (m == 0x1E70) return 0xD8;                                  /* SHADER_STAGE_PROGRAM PSTextureModes (1D90 is COLOR_CLEAR_VALUE) */
     if (m == 0x1E74) return 0xDC;                                  /* DOT_RGBMAPPING PSDotMapping    */
     if (m == 0x1E78) return 0xE0;                                  /* SHADER_OTHER_STAGE_INPUT PSInputTexture */
     return -1;
@@ -679,7 +898,15 @@ void xd3d_ps_sync(void)
     if (!xd3d_state.ps_dirty) return;
     xd3d_state.ps_dirty = 0;
     const uint8_t *d = (const uint8_t *)xd3d_state.ps_shadow;
-    xd3d_state.ps_hash = psdef_hash(d);
+    static int cache_enabled=-1;
+    if (cache_enabled<0) {
+        const char *e=getenv("XV_PREP_STATE_CACHE");
+        cache_enabled=!e || atoi(e)!=0;
+        D3DLOG("draw preparation: shader identity cache %s\n",cache_enabled?"on":"off");
+    }
+    if (cache_enabled) xv_ps_identity_lookup(&ps_identity_cache,d,&xd3d_state.ps_hash,&xd3d_state.ps_key);
+    else { xd3d_state.ps_hash=psdef_hash(d); xd3d_state.ps_key=xv_ps_program_key(d); }
+    ps_synced=1;
     /* NV2A constants are per stage (UNIQUE_C0/C1, which Halo always sets); PSC0/1Mapping only matters for
      * SetPixelShaderConstant, which Halo never calls.  Layout matches pixelshader_recomp_gen.py's psc[18]. */
     #define PSC_SET(idx, col) do { uint32_t col_ = (col); float *o_ = xd3d_state.psc[(idx)]; \
@@ -725,6 +952,16 @@ void xv_hle_D3DDevice_CreateTexture(xctx *c)
     static unsigned n; if (n++ < 16) D3DLOG("CreateTexture(%ux%u, levels %u, fmt %02X) -> %08X data %08X (%u KB)\n", X_ARG(0), X_ARG(1), X_ARG(2), X_ARG(4), t, RES_DATA(t), bytes >> 10);
     X_M32(X_ARG(6)) = t; c->r[0] = RES_DATA(t) ? 0 : 0x8007000Eu; X_RET(7);
 }
+/* HRESULT CreateImageSurface(Width, Height, Format, ppSurface). This Halo symbol
+ * manifest has no named entry; guest-created headers still use the same layout. */
+void xv_hle_D3DDevice_CreateImageSurface(xctx *c)
+{
+    XD3D_COUNT("D3DDevice_CreateImageSurface");
+    uint32_t s = make_pixel_container(X_ARG(0), X_ARG(1), 1, 1, X_ARG(2), 0, 0, NULL);
+    RES_COMMON(s) = (RES_COMMON(s) & ~0x00070000u) | X_D3DCOMMON_TYPE_SURFACE;
+    SURF_PARENT(s) = 0;
+    X_M32(X_ARG(3)) = s; c->r[0] = RES_DATA(s) ? 0 : 0x8007000Eu; X_RET(4);
+}
 /* HRESULT D3DDevice_CreateVolumeTexture(Width, Height, Depth, Levels, Usage, Format, Pool, ppVolumeTexture) */
 void xv_hle_D3DDevice_CreateVolumeTexture(xctx *c) { XD3D_COUNT("D3DDevice_CreateVolumeTexture"); uint32_t t = make_pixel_container(X_ARG(0), X_ARG(1), X_ARG(2), X_ARG(3), X_ARG(5), 0, 1, NULL); X_M32(X_ARG(7)) = t; c->r[0] = RES_DATA(t) ? 0 : 0x8007000Eu; X_RET(8); }
 /* HRESULT D3DDevice_CreateCubeTexture(EdgeLength, Levels, Usage, Format, Pool, ppCubeTexture) */
@@ -761,12 +998,25 @@ void xv_hle_D3DResource_Register(xctx *c)
     static unsigned n; if (n++ < 6) D3DLOG("Register(%08X: common %08X data %08X + base %08X -> %08X)\n", r, RES_COMMON(r), data, base, RES_DATA(r));
     c->r[0] = 0; X_RET(2);
 }
-void xv_hle_D3DResource_Release(xctx *c)
-{ XD3D_COUNT("D3DResource_Release");
-    uint32_t r = X_ARG(0); uint32_t rc = RES_COMMON(r) & X_D3DCOMMON_REFCOUNT_MASK;
-    if (rc > 1) RES_COMMON(r)--; else if ((RES_COMMON(r) & X_D3DCOMMON_D3DCREATED) && RES_DATA(r)) { xk_phys_free(RES_DATA(r)); RES_DATA(r) = 0; RES_COMMON(r) &= ~X_D3DCOMMON_REFCOUNT_MASK; }
-    c->r[0] = rc ? rc - 1 : 0; X_RET(1);
+static uint32_t release_resource(uint32_t r)
+{
+    uint32_t common = RES_COMMON(r), rc = common & X_D3DCOMMON_REFCOUNT_MASK;
+    if (rc > 1) RES_COMMON(r)--;
+    else if (rc) {
+        RES_COMMON(r) &= ~X_D3DCOMMON_REFCOUNT_MASK;
+        if ((common & 0x00070000u) == X_D3DCOMMON_TYPE_SURFACE && SURF_PARENT(r)) {
+            uint32_t parent = SURF_PARENT(r); SURF_PARENT(r) = 0;
+            release_resource(parent);
+        } else if ((common & X_D3DCOMMON_D3DCREATED) && RES_DATA(r)) {
+            xd3d_r_state("ReleaseRenderTarget", RES_DATA(r), 0, 0);
+            xk_phys_free(RES_DATA(r));
+        }
+        RES_DATA(r) = 0;
+    }
+    return rc ? rc - 1 : 0;
 }
+void xv_hle_D3DResource_Release(xctx *c)
+{ XD3D_COUNT("D3DResource_Release"); c->r[0] = release_resource(X_ARG(0)); X_RET(1); }
 void xv_hle_D3DResource_AddRef(xctx *c) { XD3D_COUNT("D3DResource_AddRef"); RES_COMMON(X_ARG(0))++; c->r[0] = RES_COMMON(X_ARG(0)) & X_D3DCOMMON_REFCOUNT_MASK; X_RET(1); }
 void xv_hle_D3DResource_IsBusy(xctx *c) { XD3D_COUNT("D3DResource_IsBusy"); c->r[0] = 0; X_RET(1); }
 void xv_hle_D3DResource_BlockUntilNotBusy(xctx *c) { XD3D_COUNT("D3DResource_BlockUntilNotBusy"); X_RET(1); }
@@ -781,7 +1031,7 @@ static void level_geom(uint32_t hdr, unsigned level, unsigned *w, unsigned *h, u
     int cube = (f & 4) != 0; uint32_t off = 0;
     for (unsigned l = 0; l < level; ++l) { off += level_bytes(*fmt, W, H, D) * (cube ? 6 : 1); W = W > 1 ? W >> 1 : 1; H = H > 1 ? H >> 1 : 1; D = D > 1 ? D >> 1 : 1; }
     *w = W; *h = H; *d = D; *offset = off;
-    *pitch = fmt_is_dxt(*fmt) ? ((W + 3) / 4) * (*fmt == 0x0C ? 8 : 16) : (s ? (((s >> 24) & 0xFF) + 1) * 64 : W * fmt_bits(*fmt) / 8);
+    *pitch = fmt_is_dxt(*fmt) ? ((W + 3) / 4) * (*fmt == 0x0C ? 8 : 16) : (s ? (level ? ((W * fmt_bits(*fmt) / 8 + 63) & ~63u) : (((s >> 24) & 0xFF) + 1) * 64) : W * fmt_bits(*fmt) / 8);
 }
 /* D3DTexture_LockRect(pThis, Level, pLockedRect { INT Pitch; void *pBits; }, pRect, Flags) */
 void xv_hle_D3DTexture_LockRect(xctx *c)
@@ -813,26 +1063,41 @@ void xv_hle_D3DVolumeTexture_LockBox(xctx *c)
 void xv_hle_D3DVertexBuffer_Lock(xctx *c) { XD3D_COUNT("D3DVertexBuffer_Lock"); X_M32(X_ARG(3)) = GUEST_PTR(RES_DATA(X_ARG(0)) + X_ARG(1)); c->r[0] = 0; X_RET(5); }
 void xv_hle_D3DIndexBuffer_Lock(xctx *c) { XD3D_COUNT("D3DIndexBuffer_Lock"); X_M32(X_ARG(3)) = GUEST_PTR(RES_DATA(X_ARG(0)) + X_ARG(1)); c->r[0] = 0; X_RET(5); }
 void xv_hle_D3DPalette_Lock(xctx *c) { XD3D_COUNT("D3DPalette_Lock"); X_M32(X_ARG(1)) = GUEST_PTR(RES_DATA(X_ARG(0))); c->r[0] = 0; X_RET(3); }
-/* D3DSurface_GetDesc(pThis, pDesc { Format, Type, Usage, Pool, Size, MultiSampleType, Width, Height }) */
-static void fill_desc(uint32_t s, uint32_t desc)
+/* Xbox 3925 D3DSURFACE_DESC is 28 bytes, with no PC Pool field.
+ * Get2DSurfaceDesc @189940 writes Width/Height at +14/+18, not +18/+1C. */
+static void fill_desc(uint32_t s, unsigned level, uint32_t desc)
 {
-    unsigned w, h, d, fmt, pitch; uint32_t off; level_geom(s, 0, &w, &h, &d, &fmt, &off, &pitch);
-    X_M32(desc) = fmt; X_M32(desc + 4) = 1; X_M32(desc + 8) = 0; X_M32(desc + 12) = 0; X_M32(desc + 16) = level_bytes(fmt, w, h, d); X_M32(desc + 20) = 0; X_M32(desc + 24) = w; X_M32(desc + 28) = h;
+    unsigned w, h, d, fmt, pitch; uint32_t off;
+    level_geom(s, level, &w, &h, &d, &fmt, &off, &pitch);
+    uint32_t f=PC_FORMAT(s), type=1, usage=0;
+    if ((RES_COMMON(s)&0x00070000u)==X_D3DCOMMON_TYPE_TEXTURE)
+        type=(f&4u) ? 5u : ((f>>4)&15u)==3u ? 4u : 3u;
+    else if (((f>>4)&15u)==3u) type=2;
+    /* Base-level capabilities from Halo 3925's format table at 18DF10. */
+    if (!level) switch (fmt) {
+    case 0x03: case 0x05: case 0x06: case 0x07: case 0x11:
+    case 0x12: case 0x13: case 0x17: case 0x1C: case 0x1E: usage=1; break;
+    case 0x2A: case 0x2B: case 0x2C: case 0x2D:
+    case 0x2E: case 0x2F: case 0x30: case 0x31: usage=2; break;
+    }
+    uint32_t size=fmt_is_dxt(fmt) ? level_bytes(fmt,w,h,d) : pitch*h*d;
+    uint32_t words[7]={fmt,type,usage,size,0x11u,w,h}; /* Xbox MULTISAMPLE_NONE */
+    x_guest_write(desc,words,sizeof words);
 }
-void xv_hle_D3DSurface_GetDesc(xctx *c) { XD3D_COUNT("D3DSurface_GetDesc"); fill_desc(X_ARG(0), X_ARG(1)); c->r[0] = 0; X_RET(2); }
-void xv_hle_Get2DSurfaceDesc(xctx *c) { XD3D_COUNT("Get2DSurfaceDesc"); fill_desc(X_ARG(0), X_ARG(2)); X_RET(3); }
+void xv_hle_D3DSurface_GetDesc(xctx *c) { XD3D_COUNT("D3DSurface_GetDesc"); fill_desc(X_ARG(0), 0, X_ARG(1)); c->r[0] = 0; X_RET(2); }
+void xv_hle_Get2DSurfaceDesc(xctx *c) { XD3D_COUNT("Get2DSurfaceDesc"); fill_desc(X_ARG(0), X_ARG(1), X_ARG(2)); X_RET(3); }
 /* D3DTexture_GetSurfaceLevel(pThis, Level, ppSurface): a surface header aliasing the level */
 void xv_hle_D3DTexture_GetSurfaceLevel(xctx *c)
 { XD3D_COUNT("D3DTexture_GetSurfaceLevel");
     uint32_t t = X_ARG(0); unsigned w, h, d, fmt, pitch; uint32_t off; level_geom(t, X_ARG(1), &w, &h, &d, &fmt, &off, &pitch);
     uint32_t s = new_header(X_D3DCOMMON_TYPE_SURFACE, 64);
     RES_DATA(s) = RES_DATA(t) + off; RES_COMMON(s) &= ~X_D3DCOMMON_D3DCREATED;
-    PC_FORMAT(s) = (PC_FORMAT(t) & ~0xFFF00000u) | (log2u(w) << 20) | (log2u(h) << 24); PC_SIZE(s) = PC_SIZE(t); SURF_PARENT(s) = t;
+    PC_FORMAT(s) = (PC_FORMAT(t) & ~0xFFF00000u) | (log2u(w) << 20) | (log2u(h) << 24); PC_SIZE(s) = PC_SIZE(t) ? ((w - 1) | ((h - 1) << 12) | ((pitch / 64 - 1) << 24)) : 0; SURF_PARENT(s) = t;
     RES_COMMON(t)++;
     X_M32(X_ARG(2)) = s; c->r[0] = 0; X_RET(3);
 }
 
-/* ---- DirectSound (silent) ------------------------------------------------------------------------ */
+/* ---- DirectSound ------------------------------------------------------------------------ */
 static uint32_t ds_obj(unsigned size) { uint32_t o = xk_kalloc(size); X_M32(o) = 1; { static unsigned n; if (n++ < 200 && getenv("XV_LOG_DS")) D3DLOG("ds_obj %08X (%u B)\n", o, size); } return o; }
 /* Sound STREAMS are XMediaObjects: Halo drives them through the COM vtable ({QI, AddRef, Release, GetInfo,
  * GetStatus, Process, Discontinuity, Flush}), not the IDirectSoundStream_* C wrappers.  Point our objects
@@ -845,10 +1110,43 @@ static uint32_t ds_obj(unsigned size) { uint32_t o = xk_kalloc(size); X_M32(o) =
  * movie runs at the speed its audio track dictates.  Completion is checked whenever the game touches the
  * sound system (DoWork once per frame, GetStatus/Process from the feeder). */
 #include "xk_audio.h"
+#include "dsound_state.h"
+static int ds_log_enabled(void)
+{
+    static int enabled = -1;
+    if (enabled < 0) { const char *e = getenv("XV_DSOUND_LOG"); enabled = e && !strcmp(e, "1"); }
+    return enabled;
+}
+static void ds_state_format(ds_state *s, uint32_t wfx)
+{
+    s->tag = 1; s->channels = 2; s->rate = 48000; s->bits = 16; s->align = 4;
+    if (!wfx) return;
+    s->tag = X_M16(wfx);
+    uint32_t ch = X_M16(wfx + 2), rate = X_M32(wfx + 4);
+    if (ch == 1 || ch == 2) s->channels = ch;
+    if (rate >= 4000 && rate <= 96000) s->rate = rate;
+    s->bits = X_M16(wfx + 14) == 8 ? 8 : 16;
+    s->align = s->tag == 0x69 ? (X_M16(wfx + 12) ? X_M16(wfx + 12) : 36 * s->channels) : s->channels * (s->bits / 8);
+}
+static void ds_state_log(const char *event, uint32_t obj, ds_state *s, int queued)
+{
+    if (ds_log_enabled()) D3DLOG("dsound %s obj=%08X bytes=%u format=%X ch=%u bits=%u rate=%u loop=%d duration_us=%llu start_us=%llu end_us=%llu queued=%d\n",
+        event, obj, s->size, s->tag, s->channels, s->bits, ds_state_rate(s), s->looping,
+        (unsigned long long)s->duration_us, (unsigned long long)s->start_us, (unsigned long long)s->end_us, queued);
+}
+static int ds_state_report(uint32_t obj, ds_state *s, int playing, int queued)
+{
+    static unsigned transitions;
+    if (playing != s->last_report) {
+        if (ds_log_enabled() && transitions++ < 256) ds_state_log(playing ? "IsPlaying 0->1" : "IsPlaying 1->0", obj, s, queued);
+        s->last_report = playing;
+    }
+    return playing;
+}
 #define DS_MAX_STREAMS 128
 #define DS_MAX_PKTS    8
-typedef struct { uint32_t status_ptr, completed_ptr, size, event, context; uint64_t due_us; } ds_pkt;
-typedef struct { uint32_t obj; uint32_t bytes_per_sec; uint32_t callback, cb_context, max_pkts; uint64_t tail_us; ds_pkt q[DS_MAX_PKTS]; int nq; int voice; } ds_stream;
+typedef struct { uint32_t status_ptr, completed_ptr, size, event, context; uint64_t due_us, report_due_us; } ds_pkt;
+typedef struct { uint32_t obj; uint32_t bytes_per_sec; uint32_t callback, cb_context, max_pkts; uint64_t tail_us; ds_pkt q[DS_MAX_PKTS]; int nq; int voice; ds_state state; } ds_stream;
 static ds_stream g_ds_streams[DS_MAX_STREAMS];
 static ds_stream *ds_stream_find(uint32_t obj) { for (int i = 0; i < DS_MAX_STREAMS; ++i) if (g_ds_streams[i].obj == obj) return &g_ds_streams[i]; return NULL; }
 /* Completion: status/size out-params, the completion event, and - what Halo's mixer actually relies on -
@@ -894,6 +1192,7 @@ static uint32_t ds_stream_obj(uint32_t desc)
         /* DSSTREAMDESC { dwFlags, dwMaxAttachedPackets, lpwfxFormat, lpMixBins, lpfnCallback, lpvContext } */
         uint32_t wfx = desc ? X_M32(desc + 8) : 0;
         s->voice = xk_audio_voice_new(2, wfx);
+        ds_state_format(&s->state, wfx); s->state.stopped = 1; ds_state_log("create stream", o, &s->state, 0);
         if (wfx) { uint32_t bps = X_M32(wfx + 8); if (bps >= 8000 && bps <= 2000000) s->bytes_per_sec = bps; }
         /* XDK 3925 DSSTREAMDESC has no lpMixBins: callback at +12, context at +16 (verified from Halo's calls) */
         if (desc) { uint32_t mp = X_M32(desc + 4); if (mp >= 1 && mp <= DS_MAX_PKTS) s->max_pkts = mp; s->callback = X_M32(desc + 12); s->cb_context = X_M32(desc + 16); }
@@ -921,6 +1220,13 @@ static void xv_hle_CDirectSoundStream_Process(xctx *c)
         p->size = size; p->completed_ptr = X_M32(pkt + 8); p->status_ptr = X_M32(pkt + 12); p->event = 0; p->context = X_M32(pkt + 16);
         p->due_us = start + (uint64_t)size * 1000000ull / (s->bytes_per_sec ? s->bytes_per_sec : 192000);
         s->tail_us = p->due_us;
+        ds_state *st = &s->state;
+        uint64_t report_start = !st->stopped && st->end_us > now ? st->end_us : now;
+        st->size = size; st->duration_us = ds_state_duration(st, size);
+        st->start_us = now; st->end_us = report_start + st->duration_us;
+        p->report_due_us = st->end_us;
+        st->stopped = st->paused = 0;
+        ds_state_log("play packet", s->obj, st, s->nq);
         if (p->status_ptr) X_M32(p->status_ptr) = 1;                       /* XMEDIAPACKET_STATUS_PENDING */
         if (s->voice >= 0) xk_audio_stream_push(s->voice, X_M32(pkt), size);   /* pvBuffer */
         { static unsigned n; if (n++ < 3) D3DLOG("stream packet %u bytes = %u ms at %u B/s (max %u queued)\n", size, (unsigned)((uint64_t)size * 1000u / (s->bytes_per_sec ? s->bytes_per_sec : 1)), s->bytes_per_sec, s->max_pkts); }
@@ -938,7 +1244,7 @@ static void xv_hle_CDirectSoundStream_Flush(xctx *c)
 {
     { ds_stream *fs = ds_stream_find(X_ARG(0)); if (fs && fs->voice >= 0) xk_audio_stream_flush(fs->voice); } XD3D_COUNT("CDirectSoundStream_Flush");
     ds_stream *s = ds_stream_find(X_ARG(0));
-    if (s) { int n = s->nq; ds_pkt q[DS_MAX_PKTS]; memcpy(q, s->q, sizeof q); s->nq = 0; s->tail_us = 0;
+    if (s) { ds_state_stop(&s->state, xk_os_monotonic_us()); ds_state_log("stop flush", s->obj, &s->state, 0); int n = s->nq; ds_pkt q[DS_MAX_PKTS]; memcpy(q, s->q, sizeof q); s->nq = 0; s->tail_us = 0;
         for (int i = 0; i < n; ++i) { if (q[i].status_ptr) X_M32(q[i].status_ptr) = 2;                          /* FLUSHED */
             if (s->callback) { X_PUSH32(2); X_PUSH32(q[i].context); X_PUSH32(s->cb_context); X_PUSH32(0xDEAD0011u); xv_call(c, s->callback); } } }
     c->r[0] = 0; X_RET(1);
@@ -952,11 +1258,6 @@ const xv_fn_entry_t xv_hle_extra[] = {
     { 0x001937F5u, xv_hle_CDirectSoundStream_Discontinuity },    /* vtbl+0x14 */
     { 0x00193822u, xv_hle_CDirectSoundStream_Flush },            /* vtbl+0x18 */
     { 0, 0 } };
-/* Two tiny DSOUND helpers Halo calls on its voice wrappers ([wrapper+0x24] = the DSound object).  Lifted
- * they would poke real CDirectSoundBuffer internals; HLE'd (--hle-addr) they report "not playing" and
- * a no-op stop, which keeps the channel pump moving. */
-void xv_hle_DSoundVoiceIsPlaying(xctx *c) { XD3D_COUNT("DSoundVoiceIsPlaying"); c->r[0] = 0; X_RET(1); }
-void xv_hle_DSoundVoiceStop(xctx *c)      { XD3D_COUNT("DSoundVoiceStop"); c->r[0] = 0; X_RET(1); }
 void xv_hle_DirectSoundCreate(xctx *c) { XD3D_COUNT("DirectSoundCreate"); { static int up; if (!up) { up = 1; extern int xk_audio_start(void); extern void xv_prof_start(void) __attribute__((weak)); if (xv_prof_start) xv_prof_start(); xk_audio_init(); if (xk_audio_start() != 0) D3DLOG("audio thread failed\n"); } } uint32_t ds = ds_obj(256); D3DLOG("DirectSoundCreate -> %08X\n", ds); X_M32(X_ARG(1)) = ds; c->r[0] = 0; X_RET(3); }
 void xv_hle_DirectSoundDoWork(xctx *c) { XD3D_COUNT("DirectSoundDoWork"); ds_pump_all(c); X_RET(0); }
 void xv_hle_DirectSoundUseFullHRTF(xctx *c) { XD3D_COUNT("DirectSoundUseFullHRTF"); X_RET(0); }
@@ -966,7 +1267,7 @@ void xv_hle_DirectSoundEnterCriticalSection(xctx *c) { XD3D_COUNT("DirectSoundEn
  * SetBufferData or allocated from DSBUFFERDESC.dwBufferBytes), Lock returning pointers into it, and a play
  * cursor that advances in real time at the format's byte rate while playing.  Silent otherwise. */
 #define DS_MAX_BUFFERS 256
-typedef struct { uint32_t obj, data, size, bytes_per_sec, base_pos; uint64_t start_us; int playing, looping; int voice; } ds_buffer;
+typedef struct { uint32_t obj, data, size, bytes_per_sec, base_pos; uint64_t start_us; int playing, looping; int voice; ds_state state; } ds_buffer;
 static ds_buffer g_ds_buffers[DS_MAX_BUFFERS];
 static ds_buffer *ds_buffer_find(uint32_t obj) { for (int i = 0; i < DS_MAX_BUFFERS; ++i) if (g_ds_buffers[i].obj == obj) return &g_ds_buffers[i]; return NULL; }
 static uint32_t ds_buffer_obj(uint32_t desc)
@@ -974,6 +1275,7 @@ static uint32_t ds_buffer_obj(uint32_t desc)
     uint32_t o = ds_obj(256); ds_buffer *b = ds_buffer_find(0);
     if (!b) return o;
     memset(b, 0, sizeof *b); b->obj = o; b->bytes_per_sec = 192000; b->voice = -1;
+    ds_state_format(&b->state, desc ? X_M32(desc + 12) : 0); b->state.stopped = 1;
     if (desc) {
         uint32_t bytes = X_M32(desc + 8), wfx = X_M32(desc + 12);                /* DSBUFFERDESC { dwSize, dwFlags, dwBufferBytes, lpwfxFormat, lpMixBins, dwInputMixBin } */
         if (wfx) { uint32_t bps = X_M32(wfx + 8); if (bps >= 8000 && bps <= 2000000) b->bytes_per_sec = bps; }
@@ -981,6 +1283,7 @@ static uint32_t ds_buffer_obj(uint32_t desc)
         b->voice = xk_audio_voice_new(1, wfx);
         if (b->data) xk_audio_voice_set_data(b->voice, b->data, b->size);
     } else b->voice = xk_audio_voice_new(1, 0);
+    b->state.size = b->size; b->state.duration_us = ds_state_duration(&b->state, b->size); ds_state_log("create buffer", o, &b->state, 0);
     return o;
 }
 static uint32_t ds_buffer_pos(ds_buffer *b)
@@ -996,6 +1299,43 @@ static uint32_t ds_buffer_pos(ds_buffer *b)
     if (adv >= b->size) { b->playing = 0; b->base_pos = 0; return 0; }   /* one-shot finished */
     return (uint32_t)adv;
 }
+/* 3925 helper returns a normalized BOOL in EAX (ret 4), not HRESULT/status.
+ * HLE objects replace the whole interface; only native wrappers need +0x24. */
+static ds_state *ds_voice_state(uint32_t obj, uint32_t *resolved, int *queued)
+{
+    if (!obj) return NULL;
+    ds_buffer *b = ds_buffer_find(obj); ds_stream *s = ds_stream_find(obj);
+    if (!b && !s) { obj = X_M32(obj + 0x24); if (!obj) return NULL; b = ds_buffer_find(obj); s = ds_stream_find(obj); }
+    *resolved = obj; *queued = 0;
+    /* Callback-pending packets may already have drained. Never require DoWork
+     * from a caller spinning in IsPlaying; do not dispatch callbacks here. */
+    if (s) { uint64_t now = xk_os_monotonic_us();
+        for (int i = 0; i < s->nq; ++i) if (now < s->q[i].report_due_us) ++*queued;
+    }
+    return b ? &b->state : s ? &s->state : NULL;
+}
+void xv_hle_DSoundVoiceIsPlaying(xctx *c)
+{
+    XD3D_COUNT("DSoundVoiceIsPlaying");
+    uint32_t obj = X_ARG(0); int queued = 0;
+    ds_state *s = ds_voice_state(obj, &obj, &queued);
+    c->r[0] = s ? ds_state_report(obj, s, ds_state_playing(s, xk_os_monotonic_us()) ||
+        (!s->stopped && !s->paused && queued > 0), queued) : 0;
+    X_RET(1);
+}
+void xv_hle_DSoundVoiceStop(xctx *c)
+{
+    XD3D_COUNT("DSoundVoiceStop");
+    uint32_t obj = X_ARG(0); int queued = 0;
+    ds_state *s = ds_voice_state(obj, &obj, &queued);
+    if (s) {
+        ds_state_stop(s, xk_os_monotonic_us());
+        ds_stream *stream = ds_stream_find(obj);
+        if (stream) for (int i = 0; i < stream->nq; ++i) stream->q[i].report_due_us = 0;
+        ds_state_log("stop helper", obj, s, queued);
+    }
+    c->r[0] = 0; X_RET(1);
+}
 void xv_hle_DirectSoundCreateBuffer(xctx *c) { XD3D_COUNT("DirectSoundCreateBuffer"); X_M32(X_ARG(1)) = ds_buffer_obj(X_ARG(0)); c->r[0] = 0; X_RET(2); }
 void xv_hle_IDirectSound_CreateSoundBuffer(xctx *c) { XD3D_COUNT("IDirectSound_CreateSoundBuffer"); X_M32(X_ARG(2)) = ds_buffer_obj(X_ARG(1)); c->r[0] = 0; X_RET(4); }
 void xv_hle_IDirectSound_CreateSoundStream(xctx *c) { XD3D_COUNT("IDirectSound_CreateSoundStream"); X_M32(X_ARG(2)) = ds_stream_obj(X_ARG(1)); c->r[0] = 0; X_RET(4); }
@@ -1010,7 +1350,16 @@ void xv_hle_DSound_CRefCount_Release(xctx *c) { XD3D_COUNT("DSound_CRefCount_Rel
 DS_OK(IDirectSound_CommitDeferredSettings, 1) DS_OK(IDirectSound_SetDistanceFactor, 3) DS_OK(IDirectSound_SetI3DL2Listener, 3)
 DS_OK(IDirectSound_SetMixBinHeadroom, 3) DS_OK(IDirectSound_SetOrientation, 8) DS_OK(IDirectSound_SetPosition, 5)
 DS_OK(IDirectSound_SetRolloffFactor, 3) DS_OK(IDirectSound_SetVelocity, 5)
-void xv_hle_IDirectSoundBuffer_GetStatus(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_GetStatus"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) ds_buffer_pos(b); if (X_ARG(1)) X_M32(X_ARG(1)) = b ? ((b->playing ? 0x1 : 0) | (b->looping ? 0x4 : 0)) : 0; c->r[0] = 0; X_RET(2); }
+void xv_hle_IDirectSoundBuffer_GetStatus(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_GetStatus");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b) ds_buffer_pos(b);
+    int playing = b ? ds_state_report(b->obj, &b->state, ds_state_playing(&b->state, xk_os_monotonic_us()), 0) : 0;
+    if (X_ARG(1)) X_M32(X_ARG(1)) = playing ? (1u | (b->state.looping ? 4u : 0)) : 0;
+    c->r[0] = 0;
+    X_RET(2);
+}
 /* Lock(pThis, dwOffset, dwBytes, ppvAudioPtr1, pdwAudioBytes1, ppvAudioPtr2, pdwAudioBytes2, dwFlags) */
 void xv_hle_IDirectSoundBuffer_Lock(xctx *c)
 {
@@ -1028,23 +1377,124 @@ void xv_hle_IDirectSoundBuffer_Lock(xctx *c)
     c->r[0] = (b && b->data) ? 0 : 0x88780032u;                              /* DSERR_INVALIDPARAM */
     X_RET(8);
 }
-void xv_hle_IDirectSoundBuffer_Play(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_Play"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) { b->base_pos = ds_buffer_pos(b); b->start_us = xk_os_monotonic_us(); b->playing = 1; b->looping = (X_ARG(3) & 1) != 0; xk_audio_voice_play(b->voice, b->looping); } c->r[0] = 0; X_RET(4); }
-void xv_hle_IDirectSoundBuffer_Release(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_Release"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) { xk_audio_voice_free(b->voice); b->obj = 0; } c->r[0] = 0; X_RET(1); }
-void xv_hle_IDirectSoundBuffer_SetBufferData(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_SetBufferData"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b && X_ARG(1)) { b->data = X_ARG(1); b->size = X_ARG(2); xk_audio_voice_set_data(b->voice, b->data, b->size); } c->r[0] = 0; X_RET(3); }
-void xv_hle_IDirectSoundBuffer_SetCurrentPosition(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_SetCurrentPosition"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) { b->base_pos = X_ARG(1); b->start_us = xk_os_monotonic_us(); xk_audio_voice_set_pos(b->voice, X_ARG(1)); } c->r[0] = 0; X_RET(2); }
-void xv_hle_IDirectSoundBuffer_SetFrequency(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_SetFrequency"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) xk_audio_voice_set_frequency(b->voice, X_ARG(1)); c->r[0] = 0; X_RET(2); }
+void xv_hle_IDirectSoundBuffer_Play(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_Play");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b) {
+        b->base_pos = ds_buffer_pos(b);
+        b->start_us = xk_os_monotonic_us();
+        b->playing = 1;
+        b->looping = (X_ARG(3) & 1) != 0;
+        xk_audio_voice_play(b->voice, b->looping);
+        ds_state_stop(&b->state, b->start_us);
+        ds_state_play(&b->state, b->start_us, b->looping);
+        ds_state_log("play buffer", b->obj, &b->state, 0);
+    }
+    c->r[0] = 0;
+    X_RET(4);
+}
+void xv_hle_IDirectSoundBuffer_Release(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_Release"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) { ds_state_stop(&b->state, xk_os_monotonic_us()); ds_state_log("stop release", b->obj, &b->state, 0); xk_audio_voice_free(b->voice); b->obj = 0; } c->r[0] = 0; X_RET(1); }
+void xv_hle_IDirectSoundBuffer_SetBufferData(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_SetBufferData");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b && X_ARG(1)) {
+        if (!ds_state_playing(&b->state, xk_os_monotonic_us())) b->state.stopped = 1;
+        b->data = X_ARG(1);
+        b->size = X_ARG(2);
+        b->state.size = b->size;
+        b->state.offset_us = 0;
+        b->state.duration_us = ds_state_duration(&b->state, b->size);
+        b->state.start_us = xk_os_monotonic_us();
+        b->state.end_us = b->state.start_us + b->state.duration_us;
+        xk_audio_voice_set_data(b->voice, b->data, b->size);
+    }
+    c->r[0] = 0;
+    X_RET(3);
+}
+void xv_hle_IDirectSoundBuffer_SetCurrentPosition(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_SetCurrentPosition");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b) {
+        if (!ds_state_playing(&b->state, xk_os_monotonic_us())) b->state.stopped = 1;
+        b->base_pos = X_ARG(1);
+        b->start_us = xk_os_monotonic_us();
+        xk_audio_voice_set_pos(b->voice, X_ARG(1));
+        uint32_t pos = X_ARG(1);
+        if (b->state.align) pos -= pos % b->state.align;
+        b->state.offset_us = ds_state_duration(&b->state, pos < b->size ? pos : b->size);
+        b->state.start_us = b->start_us;
+        b->state.end_us = b->start_us + ds_state_duration(&b->state, b->size) - b->state.offset_us;
+    }
+    c->r[0] = 0;
+    X_RET(2);
+}
+void xv_hle_IDirectSoundBuffer_SetFrequency(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_SetFrequency");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b) {
+        uint64_t old = ds_state_duration(&b->state, b->size);
+        b->state.frequency = X_ARG(1) >= 100 && X_ARG(1) <= 192000 ? X_ARG(1) : 0;
+        ds_state_retime(&b->state, xk_os_monotonic_us(), old);
+        xk_audio_voice_set_frequency(b->voice, X_ARG(1));
+    }
+    c->r[0] = 0;
+    X_RET(2);
+}
 void xv_hle_IDirectSoundBuffer_SetVolume(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_SetVolume"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) xk_audio_voice_set_volume_db100(b->voice, (int32_t)X_ARG(1)); c->r[0] = 0; X_RET(2); }
 void xv_hle_IDirectSoundBuffer_SetLoopRegion(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_SetLoopRegion"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) xk_audio_voice_set_loop(b->voice, X_ARG(1), X_ARG(2)); c->r[0] = 0; X_RET(3); }
-void xv_hle_IDirectSoundBuffer_SetFormat(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_SetFormat"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b && X_ARG(1)) { xk_audio_voice_set_format(b->voice, X_ARG(1)); uint32_t bps = X_M32(X_ARG(1) + 8); if (bps >= 8000 && bps <= 2000000) b->bytes_per_sec = bps; } c->r[0] = 0; X_RET(2); }
+void xv_hle_IDirectSoundBuffer_SetFormat(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_SetFormat");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b && X_ARG(1)) {
+        uint64_t old = ds_state_duration(&b->state, b->size);
+        ds_state_format(&b->state, X_ARG(1));
+        ds_state_retime(&b->state, xk_os_monotonic_us(), old);
+        xk_audio_voice_set_format(b->voice, X_ARG(1));
+        uint32_t bps = X_M32(X_ARG(1) + 8);
+        if (bps >= 8000 && bps <= 2000000) b->bytes_per_sec = bps;
+    }
+    c->r[0] = 0;
+    X_RET(2);
+}
 DS_OK(IDirectSoundBuffer_SetHeadroom, 2) DS_OK(IDirectSoundBuffer_SetMixBins, 2)
 DS_OK(IDirectSoundBuffer_SetPitch, 2) DS_OK(IDirectSoundBuffer_Unlock, 5)
-void xv_hle_IDirectSoundBuffer_Stop(xctx *c) { XD3D_COUNT("IDirectSoundBuffer_Stop"); ds_buffer *b = ds_buffer_find(X_ARG(0)); if (b) { b->base_pos = ds_buffer_pos(b); b->playing = 0; xk_audio_voice_stop(b->voice); } c->r[0] = 0; X_RET(1); }
+void xv_hle_IDirectSoundBuffer_Stop(xctx *c)
+{
+    XD3D_COUNT("IDirectSoundBuffer_Stop");
+    ds_buffer *b = ds_buffer_find(X_ARG(0));
+    if (b) {
+        b->base_pos = ds_buffer_pos(b);
+        b->playing = 0;
+        xk_audio_voice_stop(b->voice);
+        ds_state_stop(&b->state, xk_os_monotonic_us());
+        ds_state_log("stop buffer", b->obj, &b->state, 0);
+    }
+    c->r[0] = 0;
+    X_RET(1);
+}
 DS_OK(IDirectSoundStream_SetConeAngles, 4) DS_OK(IDirectSoundStream_SetConeOrientation, 5) DS_OK(IDirectSoundStream_SetConeOutsideVolume, 3)
 DS_OK(IDirectSoundStream_SetI3DL2Source, 3) DS_OK(IDirectSoundStream_SetMaxDistance, 3) DS_OK(IDirectSoundStream_SetMinDistance, 3)
 DS_OK(IDirectSoundStream_SetMixBinVolumes_12, 3) DS_OK(IDirectSoundStream_SetMode, 3) DS_OK(IDirectSoundStream_SetPosition, 5)
 DS_OK(IDirectSoundStream_SetVelocity, 5) DS_OK(CDirectSoundBufferSettings_SetBufferData, 2) DS_OK(CDirectSoundStream_AddRef, 1)
-DS_OK(CDirectSoundStream_Release, 1) DS_OK(CDirectSoundStream_SetMixBins, 2)
-void xv_hle_CDirectSoundStream_SetFrequency(xctx *c) { XD3D_COUNT("CDirectSoundStream_SetFrequency"); ds_stream *s = ds_stream_find(X_ARG(0)); if (s) xk_audio_voice_set_frequency(s->voice, X_ARG(1)); c->r[0] = 0; X_RET(2); }
+void xv_hle_CDirectSoundStream_Release(xctx *c)
+{
+    ds_stream *s = ds_stream_find(X_ARG(0));
+    if (s) { ds_state_stop(&s->state, xk_os_monotonic_us()); ds_state_log("stop release", s->obj, &s->state, s->nq); }
+    c->r[0] = 0; X_RET(1);
+}
+DS_OK(CDirectSoundStream_SetMixBins, 2)
+void xv_hle_CDirectSoundStream_SetFrequency(xctx *c) { XD3D_COUNT("CDirectSoundStream_SetFrequency"); ds_stream *s = ds_stream_find(X_ARG(0)); if (s) { uint64_t now = xk_os_monotonic_us(); uint32_t old = ds_state_rate(&s->state);
+        s->state.frequency = X_ARG(1) >= 100 && X_ARG(1) <= 192000 ? X_ARG(1) : 0;
+        if (s->state.end_us > now) s->state.end_us = now + (s->state.end_us - now) * old / ds_state_rate(&s->state);
+        for (int i = 0; i < s->nq; ++i) if (s->q[i].report_due_us > now)
+            s->q[i].report_due_us = now + (s->q[i].report_due_us - now) * old / ds_state_rate(&s->state);
+        s->state.duration_us = ds_state_duration(&s->state, s->state.size);
+        xk_audio_voice_set_frequency(s->voice, X_ARG(1)); } c->r[0] = 0; X_RET(2); }
 void xv_hle_CDirectSoundStream_SetVolume(xctx *c) { XD3D_COUNT("CDirectSoundStream_SetVolume"); ds_stream *s = ds_stream_find(X_ARG(0)); if (s) xk_audio_voice_set_volume_db100(s->voice, (int32_t)X_ARG(1)); c->r[0] = 0; X_RET(2); }
 DS_OK(CMcpxAPU_Commit3dSettings, 1) DS_OK(CMcpxStream_Flush, 0) DS_OK(CMcpxVoiceClient_Commit3dSettings_4, 1)
 static void ds_report_pos(ds_buffer *b, uint32_t pplay, uint32_t pwrite)
