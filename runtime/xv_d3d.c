@@ -233,6 +233,20 @@ typedef struct {
     unsigned visibility_back_area;
     unsigned visibility_draw_slot; /* pump-owned cached GXM state */
 } cmdlist_t;
+#include "xv_record_prefix.h"
+#if XV_RECORD_PREFIX
+#if !defined(XV_QUERY_BOUNDARY) || !defined(XV_FLARE_QUERY_OVERLAP)
+#error XV_RECORD_PREFIX requires exact retained visibility generations
+#endif
+typedef struct {
+    xv_record_prefix packet;
+    unsigned attempted,physical,early,ended,command,ui,clear,current,stored,copied;
+    SceGxmDepthStencilSurface depth;
+} xv_record_prefix_state;
+static xv_record_prefix_state g_record_prefix[XV_NUM_LISTS];
+static void try_record_prefix(void);
+#endif
+
 
 /* ----------------------------------------------------------------------------------
  *  State
@@ -332,8 +346,17 @@ static void frame_constants_shutdown(void)
 static const uint8_t *frame_constants_prepare(const cmdlist_t *l, uint32_t frame)
 {
     unsigned slot = frame % XV_NUM_LISTS;
-    if (!l->nconsts || l->nconsts > XV_CONST_POOL) return NULL;
-    if (g_frame_constants[slot].ready && g_frame_constants[slot].frame == frame)
+#if XV_RECORD_PREFIX
+    unsigned nconsts=g_record_prefix[slot].early?g_record_prefix[slot].packet.constants:l->nconsts;
+#else
+#define nconsts (l->nconsts)
+#endif
+    if (!nconsts || nconsts > XV_CONST_POOL) return NULL;
+    if (g_frame_constants[slot].ready && g_frame_constants[slot].frame == frame
+#if XV_RECORD_PREFIX
+        && g_record_prefix[slot].copied==nconsts
+#endif
+        )
         return g_frame_constants[slot].memory;
     if (!g_frame_constants[slot].memory) {
         void *mem = NULL;
@@ -353,9 +376,20 @@ static const uint8_t *frame_constants_prepare(const cmdlist_t *l, uint32_t frame
         XV_LOG("frame constants slot %u: %u KiB + mapped tail @ %p\n", slot,
             (unsigned)(XV_FRAME_CONSTANT_BYTES / 1024), mem);
     }
-    unsigned bytes = l->nconsts * sizeof(float);
+#if XV_RECORD_PREFIX
+    unsigned first=g_frame_constants[slot].ready && g_frame_constants[slot].frame==frame ? g_record_prefix[slot].copied : 0;
+    if(nconsts<first)return NULL;
+    unsigned bytes=(nconsts-first)*sizeof(float);
+    if(bytes) {
+        memcpy(g_frame_constants[slot].memory+first*sizeof(float),l->consts+first,bytes);
+        xv_gpu_flush_pump(g_frame_constants[slot].memory+first*sizeof(float),bytes);
+    }
+    g_record_prefix[slot].copied=nconsts;
+#else
+    unsigned bytes = nconsts * sizeof(float);
     memcpy(g_frame_constants[slot].memory, l->consts, bytes);
     xv_gpu_flush_pump(g_frame_constants[slot].memory, bytes);
+#endif
     g_frame_constants[slot].frame = frame;
     g_frame_constants[slot].ready = 1;
     g_constant_upload_bytes += bytes;
@@ -370,6 +404,8 @@ static const uint8_t *frame_constants_prepare(const cmdlist_t *l, uint32_t frame
     }
     return g_frame_constants[slot].memory;
 }
+
+#undef nconsts
 
 /* Every shipped Halo vertex program exposes c[] as a complete float4 array at
  * offset zero in its default buffer. Verify reflection, including the buffer
@@ -396,12 +432,17 @@ static int bind_vertex_constants(SceGxmContext *ctx, const cmdlist_t *l,
     const cmd_t *c, const xv_vshader_t *vs, uint32_t frame)
 {
     if (!vs->p_c) return 1;
+#if XV_RECORD_PREFIX
+    unsigned nconsts=g_record_prefix[frame%XV_NUM_LISTS].early?g_record_prefix[frame%XV_NUM_LISTS].packet.constants:l->nconsts;
+#else
+#define nconsts (l->nconsts)
+#endif
     int err = -1;
     /* Pool exhaustion used to submit a draw with the previous draw's constants.
      * Reject it, and all malformed ranges, before touching any GPU buffer. */
     if (c->vs >= XV_MAX_VS || !c->const_n || c->const_n != vs->desc->c_count ||
-        l->nconsts > XV_CONST_POOL || c->const_off > l->nconsts / 4 ||
-        c->const_n > l->nconsts / 4 - c->const_off) goto bad;
+        nconsts > XV_CONST_POOL || c->const_off > nconsts / 4 ||
+        c->const_n > nconsts / 4 - c->const_off) goto bad;
     static int enabled = -1;
     if (enabled < 0) {
         const char *e = getenv("XV_FRAME_CONSTANTS"); enabled = !e || atoi(e) != 0;
@@ -426,9 +467,11 @@ bad:
     ++g_constant_bad_draws;
     static unsigned warnings;
     if (warnings++ < 12) XV_LOG("vertex constants rejected: frame %u vs %u offset %u count %u pool %u err %08X\n",
-        frame, c->vs, c->const_off, c->const_n, l->nconsts, err);
+        frame, c->vs, c->const_off, c->const_n, nconsts, err);
     return 0;
 }
+
+#undef nconsts
 /* End frame-owned vertex constants. */
 
 /* ----------------------------------------------------------------------------------
@@ -1056,6 +1099,25 @@ static cmd_t *new_cmd(void)
     if (c->pass && c->pass <= XV_RT_SLOTS) g_rt[c->pass - 1].last_frame = g_build_frame;
     return c;
 }
+
+#if XV_RECORD_PREFIX
+static void try_record_prefix(void)
+{
+    cmdlist_t *l=cur_list();
+    xv_record_prefix_state *p=&g_record_prefix[g_build_frame%XV_NUM_LISTS];
+    if(p->attempted || l->ncmds<2 || l->cmds[l->ncmds-1].pass==l->cmds[0].pass)return;
+    p->attempted=1; /* Only the actually observed first transition is considered. */
+    if(l->nui || l->active_visibility || !l->nvisibility)return;
+    xv_query_boundary_plan plan={0};
+    if(qb_plan(l,&plan)!=QB_READY || plan.ui || plan.command+1!=l->ncmds)return;
+    for(unsigned i=0;i<plan.command;i++)if(l->cmds[i].previous_frame)return;
+    xv_record_prefix prefix={.frame=g_build_frame,.command=plan.command,
+        .constants=l->nconsts,.visibility=l->nvisibility};
+    xv_vertex_upload_seal_token(g_build_frame%XV_NUM_LISTS,&prefix.upload_ticket,&prefix.has_upload);
+    xv_gpu_flush_pending();
+    (void)xv_record_prefix_offer(&prefix);
+}
+#endif
 
 static int blend_mode(void)
 {
@@ -1891,6 +1953,9 @@ static void record_draw(uint32_t prim, uint32_t count, const void *indices, uint
                l->ncmds - 1, d->gxp, S.ps_hash, prim, count, base_vertex, S.tex_guest[0], S.tex_guest[1], S.tex_guest[2], S.tex_guest[3], c->ntex, S.src_blend, S.dst_blend, S.blend_enable ? "" : "(off)",
                S.z_enable, S.z_write, S.cull, d->c_base, d->c_base + (int)d->c_count, S.vsc[96 + d->c_base][0], S.vsc[96 + d->c_base][1], S.vsc[96 + d->c_base][2], S.vsc[96 + d->c_base][3], (unsigned)c->visibility, S.color_mask);
     xv_draw_profile_step(XV_DRAW_DIAGNOSTICS, &profile);
+#if XV_RECORD_PREFIX
+    try_record_prefix();
+#endif
 }
 
 void xv_d3d_DrawVertices(uint32_t prim, uint32_t start_vertex, uint32_t vertex_count)
@@ -2009,6 +2074,9 @@ uint32_t xv_d3d_EndFrame(void)
 unsigned xv_d3d_record_slot(void) { return g_build_frame % XV_NUM_LISTS; }
 void xv_d3d_BeginFrame(void)
 {
+#if XV_RECORD_PREFIX
+    memset(&g_record_prefix[g_build_frame%XV_NUM_LISTS],0,sizeof g_record_prefix[0]);
+#endif
     xv_index_cache_reset(g_index_cache);
     xv_vertex_upload_reset(g_build_frame % XV_NUM_LISTS);
     g_frame_constants[g_build_frame % XV_NUM_LISTS].ready = 0;
@@ -2053,6 +2121,9 @@ void xv_d3d_Clear(uint32_t flags, uint32_t color_argb, float z, uint32_t stencil
     c->clear_color = color_argb;
     c->clear_z = z;
     c->clear_stencil = (uint8_t)stencil;
+#if XV_RECORD_PREFIX
+    try_record_prefix();
+#endif
 }
 
 void xv_d3d_Swap(void)
@@ -2096,6 +2167,51 @@ static void visibility_draw_state(SceGxmContext *ctx, cmdlist_t *l, const cmd_t 
     }
     l->visibility_draw_slot=slot;
 }
+#if XV_RECORD_PREFIX
+static void visibility_physical_prepare(SceGxmContext *ctx, uint32_t frame, unsigned w, unsigned h,unsigned count)
+{
+    cmdlist_t *l=g_lists[frame % XV_NUM_LISTS];
+    XV_VP_BEGIN(l,frame);
+    l->visibility_gpu_ready=0;
+    l->visibility_back_area=w*h;
+    l->visibility_draw_slot=UINT32_MAX;
+    visibility_draw_state(ctx,l,NULL);
+    if (!count) return;
+    static int attempted;
+    if (!attempted) {
+        attempted=1;
+        unsigned bytes=XV_NUM_LISTS * XV_VISIBILITY_WORDS * sizeof(uint32_t);
+        g_visibility_uid=sceKernelAllocMemBlock("xv_visibility",SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE,bytes,NULL);
+        if (g_visibility_uid >= 0) {
+            void *p=NULL;
+            if (sceKernelGetMemBlockBase(g_visibility_uid,&p) >= 0 &&
+                sceGxmMapMemory(p,bytes,SCE_GXM_MEMORY_ATTRIB_READ|SCE_GXM_MEMORY_ATTRIB_WRITE) >= 0)
+                g_visibility_memory=p;
+            else { sceKernelFreeMemBlock(g_visibility_uid); g_visibility_uid=-1; }
+        }
+        if (!g_visibility_memory) XV_LOG("visibility buffer allocation failed; reporting zero coverage\n");
+    }
+    if (!g_visibility_memory) return;
+    uint32_t *p=g_visibility_memory+(frame % XV_NUM_LISTS)*XV_VISIBILITY_WORDS;
+    memset(p,0,XV_VISIBILITY_WORDS*sizeof *p);
+    int err=sceGxmSetVisibilityBuffer(ctx,p,XV_VISIBILITY_STRIDE);
+    l->visibility_gpu_ready=err >= 0;
+    sceGxmSetFrontVisibilityTestOp(ctx,SCE_GXM_VISIBILITY_TEST_OP_INCREMENT);
+    sceGxmSetBackVisibilityTestOp(ctx,SCE_GXM_VISIBILITY_TEST_OP_INCREMENT);
+    if (err < 0) XV_ONCE(warn_visibility,"visibility buffer rejected %08X; reporting zero coverage\n",err);
+}
+
+void xv_d3d_visibility_prepare(SceGxmContext *ctx,uint32_t frame,unsigned w,unsigned h)
+{
+    cmdlist_t *l=g_lists[frame%XV_NUM_LISTS];
+    uint32_t submitted_us=xk_os_monotonic_us?(uint32_t)xk_os_monotonic_us():0;
+    for (unsigned i=0;i<l->nvisibility;i++)
+        if (l->visibility[i].serial)
+            xv_visibility_submit(g_visibility_results,l->visibility[i].result_slot,l->visibility[i].serial,submitted_us);
+    if(!g_record_prefix[frame%XV_NUM_LISTS].physical)
+        visibility_physical_prepare(ctx,frame,w,h,l->nvisibility);
+}
+#else
 void xv_d3d_visibility_prepare(SceGxmContext *ctx, uint32_t frame, unsigned w, unsigned h)
 {
     cmdlist_t *l=g_lists[frame % XV_NUM_LISTS];
@@ -2132,6 +2248,7 @@ void xv_d3d_visibility_prepare(SceGxmContext *ctx, uint32_t frame, unsigned w, u
     sceGxmSetBackVisibilityTestOp(ctx,SCE_GXM_VISIBILITY_TEST_OP_INCREMENT);
     if (err < 0) XV_ONCE(warn_visibility,"visibility buffer rejected %08X; reporting zero coverage\n",err);
 }
+#endif
 int xv_d3d_has_visibility(uint32_t frame)
 {
     return g_lists[frame % XV_NUM_LISTS]->nvisibility != 0;
@@ -2675,6 +2792,9 @@ int xv_d3d_has_render_targets(uint32_t frame)
 }
 /* Caller supplies the current display buffer. Leaves a backbuffer scene open for
  * UI and the existing EndScene/heartbeat/flip. Only called for frames using RTT. */
+#if XV_RECORD_PREFIX
+#define xv_d3d_render_targets xv_d3d_render_targets_unprefixed
+#endif
 int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
     SceGxmRenderTarget *back, SceGxmSyncObject *sync,
     const SceGxmColorSurface *color, const SceGxmDepthStencilSurface *depth,
@@ -2784,6 +2904,11 @@ int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
     XV_VP_REPLAYED(frame,1);
     return 0;
 }
+
+#if XV_RECORD_PREFIX
+#undef xv_d3d_render_targets
+#include "xv_d3d_prefix_impl.h"
+#endif
 
 /* The clear quad's vertex shader is a runtime-owned program registered by main.c. */
 void xv_d3d_set_clear_shader(uint32_t handle) { g_clear_vs = handle; }

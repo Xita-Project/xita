@@ -29,6 +29,13 @@ void xv_vertex_worker_override(int enabled);
  * Diagnostic CPU reads use the immutable mirror, not a pending GPU copy. */
 void xv_vertex_upload_seal(unsigned slot);
 void xv_vertex_upload_wait(unsigned slot);
+#include "xv_record_prefix.h"
+#if XV_RECORD_PREFIX
+/* Recorder only. Copy a concrete token; consumers never reread pool metadata
+ * while suffix uploads append or update the slot's current token. */
+void xv_vertex_upload_seal_token(unsigned slot,uint32_t *ticket,unsigned *pending);
+void xv_vertex_upload_wait_token(uint32_t ticket,unsigned pending);
+#endif
 const void *xv_vertex_upload_readback(unsigned slot, const void *ptr);
 /* Caller must own the retired slot before reset/shutdown. */
 void xv_vertex_upload_reset(unsigned slot);

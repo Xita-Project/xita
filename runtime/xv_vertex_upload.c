@@ -149,6 +149,17 @@ void xv_vertex_upload_wait(unsigned slot)
     if (slot<XV_FRAME_SLOTS && pools[slot].has_ticket)
         xv_upload_worker_wait(pools[slot].ticket);
 }
+#if XV_RECORD_PREFIX
+void xv_vertex_upload_seal_token(unsigned slot,uint32_t *ticket,unsigned *pending)
+{
+    *ticket=0;*pending=0;
+    if(slot>=XV_FRAME_SLOTS)return;
+    dispatch(slot,1);
+    *ticket=pools[slot].ticket;*pending=pools[slot].has_ticket!=0;
+}
+void xv_vertex_upload_wait_token(uint32_t ticket,unsigned pending)
+{ if(pending)xv_upload_worker_wait(ticket); }
+#endif
 const void *xv_vertex_upload_readback(unsigned slot, const void *ptr)
 {
     if (slot<XV_FRAME_SLOTS && pools[slot].gpu) {

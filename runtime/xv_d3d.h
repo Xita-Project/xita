@@ -160,3 +160,10 @@ int xv_d3d_render_targets(SceGxmContext *ctx, uint32_t frame,
 
 unsigned xv_d3d_record_slot(void);
 void xv_d3d_BeginFrame(void);
+
+#include "xv_record_prefix.h"
+#if XV_RECORD_PREFIX
+int xv_d3d_prefix_begin(SceGxmContext *,const xv_record_prefix *,const SceGxmNotification *,
+    SceGxmRenderTarget *,SceGxmSyncObject *,const SceGxmColorSurface *,const SceGxmDepthStencilSurface *,unsigned,unsigned);
+int xv_d3d_prefix_query_valid(uint32_t frame);
+#endif
