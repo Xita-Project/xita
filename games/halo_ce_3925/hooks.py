@@ -85,6 +85,13 @@ class HaloHooks(NoGameHooks):
                 (0xB5B40, 339, "21273987e0276cda51a2d70b2b576abc42195b8efeff9ab4e8f552a15b323726")))
         self.object_scan_enabled = self.enabled and hashlib.sha256(
             image.bytes_at(0x900E0, 0x239) or b"").hexdigest() == "5bcdb3c78aa2f0b4ba4da986cfe59cb0d28c1004cbcc804abdafabd8200f520a"
+        # Collision collection's object walk and the shape callback whose
+        # early exits it reproduces, including the callback's jump tables.
+        self.object_collect_enabled = self.enabled and all(
+            hashlib.sha256(image.bytes_at(address, size) or b"").hexdigest() == digest
+            for address, size, digest in (
+                (0x171F10, 672, "39eb1cabc77888d1f879bc5980471d399fbec45bf5727078deaebd44d10d144e"),
+                (0x1716F0, 605, "b3e09bd594aede77989dd62976f907d88bd10c69e30cb646ba79287b819c45e3")))
         self.hierarchy_enabled = self.enabled and all(
             hashlib.sha256(image.bytes_at(address, size) or b"").hexdigest() == digest
             for address, size, digest in (
@@ -182,6 +189,11 @@ class HaloHooks(NoGameHooks):
                     "    { extern int xv_object_scan_active; "
                     "extern unsigned xv_object_scan_empty(xctx *, unsigned); "
                     f"if (xv_object_scan_active) xv_object_scan_empty(c, {index}u); }}",
+                    "#endif"]
+        if self.object_collect_enabled and address == 0x172034:
+            return ["#ifdef XV_NATIVE_OBJECT_COLLECT",
+                    "    { extern int xv_object_collect_refs(xctx *);",
+                    "      if (xv_object_collect_refs(c)) goto L_00172163; }",
                     "#endif"]
         if self.object_basis_enabled and address == 0x8E166:
             return ["#ifdef XV_NATIVE_OBJECT_BASIS",
