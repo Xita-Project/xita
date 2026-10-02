@@ -4,6 +4,13 @@
 
 <h1 align="center">Xita</h1>
 
+> [!IMPORTANT]
+> **Xita is closed.** Development has ended; the code stays here for anyone
+> who wants to learn from it or reuse it. Its Halo work lives on in
+> **[Halo CE for PS Vita](https://github.com/BirchWoodGod/halo-ce-vita)**,
+> a native port built from the game's decompilation. Issues and pull
+> requests here are no longer being worked on.
+
 **A toolkit for decompiling and porting original Xbox games.**
 
 [Game progress maps](https://xita.dev/games/) · [Recompiler](recompiler/README.md) · [Runtime](runtime/README.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
