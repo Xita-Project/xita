@@ -44,7 +44,7 @@ against the original, and translators for the Xbox's graphics hardware.
 Halo CE was Xita's first game. Its recompiled build reached the campaign and
 solo matches on a physical Vita, and the work behind it (the register combiner
 translation, the GPU and threading lessons, the profiling tools) went
-straight into **Halo CE for PS Vita**, a native port built from the
+straight into **[Halo CE for PS Vita](https://github.com/BirchWoodGod/halo-ce-vita)**, a native port built from the
 community decompilation of the game, which now runs the whole campaign on the
 Vita at up to 30 fps. That is the path Xita is meant for: recompile a game to
 understand it, then help its decompilation become a real port.
