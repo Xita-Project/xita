@@ -13,7 +13,7 @@
 
 **A toolkit for decompiling and porting original Xbox games.**
 
-[Game progress maps](https://xita.dev/games/) · [Recompiler](recompiler/README.md) · [Runtime](runtime/README.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
+[Game progress maps](docs/game-progress.md) · [Recompiler](recompiler/README.md) · [Runtime](runtime/README.md) · [Roadmap](ROADMAP.md) · [Contribute](CONTRIBUTING.md) · [GPL license](LICENSE)
 
 Xita started as a way to run original Xbox games on the PlayStation Vita by
 recompiling them. Along the way it became something more useful: a set of
@@ -38,9 +38,8 @@ against the original, and translators for the Xbox's graphics hardware.
   them over six million calls without a mismatch.
 - **Progress maps.** [`tools/profile_progress.py`](tools/profile_progress.py)
   turns a recompilation into a per-game map of every function: translated,
-  replaced by native code, or still needing work. Browse
-  [Halo CE's map](https://xita.dev/games/), or
-  [generate one locally](docs/game-progress.md).
+  replaced by native code, or still needing work. See
+  [how to generate one](docs/game-progress.md).
 - **Xbox graphics translation.** The NV2A GPU's register combiners and vertex
   programs are translated into shaders for other GPUs
   ([`tools/ps_pipeline.py`](tools/ps_pipeline.py) and the shader generators in
@@ -133,9 +132,9 @@ must be at `ux0:data/xita/haloce/maps/ui.map`. Your executable must match the
 
 ### Screenshots
 
-[Explore per-game progress](https://xita.dev/games/) to inspect generated
-functions and remaining instruction gaps. Developers can also generate the
-[same interactive report locally](docs/game-progress.md).
+Developers can generate an interactive
+[per-game progress report](docs/game-progress.md) to inspect generated
+functions and remaining instruction gaps.
 
 Actual development captures; select an image to view it at full size.
 
